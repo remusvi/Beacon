@@ -3,6 +3,7 @@
 #include "webview.h"
 #include "index_html.h"
 #include "core/servers/servers.h"
+#include "./core/servers/serverEntity.h"
 
 int main() {
     webview::webview main_window(true, nullptr);
@@ -20,6 +21,24 @@ int main() {
 
             return servers;
         });
+
+        // main_window.bind("addServer", [](const std::string& req) -> std::string{
+        //
+        //     auto server_data = jlib::json::parse(req);
+        //
+        //     std::string id    = server_data["uuid"];
+        //     std::string name    = server_data["name"];
+        //     std::string version = server_data["version"];
+        //     int memory          = server_data["memory"];
+        //     int port            = server_data["port"];
+        //     bool online         = server_data["online"];
+        //
+        //     std::string type_str = server_data["type"];
+        //     Provider provider = (type_str == "vanilla") ? Provider::Vanilla : Provider::Forge;
+        //
+        //     add_server(id, name, provider, version, memory, port, online);
+        //     return "Ok";
+        // });
     }catch (std::exception& e) {
         std::cerr << e.what() << std::endl;
     }

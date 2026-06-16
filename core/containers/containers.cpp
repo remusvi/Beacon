@@ -11,7 +11,7 @@
 #include "../servers/serverEntity.h"
 
 namespace fs = std::filesystem;
-std::string create_container(Container& container, const std::string& data_dir, bool online_mode, const std::string& version_path) {
+std::string create_container(Container& container, bool online_mode, const std::string& version_path) {
     //create dirs
     //logs, world,
     //server properties

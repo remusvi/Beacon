@@ -322,16 +322,15 @@ const deployInstance = async () => {
     if (!isFormValid.value) return
     isDeploying.value = true
     try {
-        const result = await window.electron.createServer(
-            crypto.randomUUID(),
-            newInstanceName.value,
-            selectedType.value,
-            newInstanceVersion.value,
-            memoryAlloc.value,
-            25565,
-            isOnlineMode.value,
-            isOnlineMode.value,
-        )
+      const result = await window.addServer(JSON.stringify({
+        id: crypto.randomUUID(),
+        name: newInstanceName.value,
+        type: selectedType.value,
+        version: newInstanceVersion.value,
+        memory: memoryAlloc.value,
+        port: 25565,
+        online: isOnlineMode.value
+      }));
         if (result && !result.error) {
             isCreating.value = false
             newInstanceName.value = ''
