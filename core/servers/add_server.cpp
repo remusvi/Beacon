@@ -2,6 +2,7 @@
 // Created by Adafa Ralph on 6/21/26.
 //
 
+#include <cstdint>
 #include <iostream>
 #include <ostream>
 #include "serverEntity.h"
@@ -9,6 +10,8 @@
 #include "../containers/container.h"
 #include "nlohmann/json.hpp"
 #include <fstream>
+#include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 namespace jlib = nlohmann;
@@ -25,6 +28,7 @@ std::string db_init() {
         //open a stream
         std::ofstream dbstream(db_path);
         dbstream.close();
+        std::cout << "creating db file" << std::endl;
     }
 
     return db_path.string();
@@ -73,21 +77,42 @@ bool online_mode
         ram,
     };
 
-    //call db init
+
+
+    //if stream to first pull data from json
     std::string db_path = db_init();
+    std::ifstream reader(db_path);
+    std::vector<serverEntity> server_list;
+
+    if (reader.is_open()){
+        
+      try{
+        jlib::json dump;
+        reader >> dump;
+        
+        
+
+        if (dump.is_array()) {
+          server_list = dump.get<std::vector<serverEntity>>();
+        }
+      }catch (const std::exception& e){
+        reader.close();
+      }
+    }
+
+    server_list.push_back(server);
+
+
+    // //call db init
+   // std::string db_path = db_init();
     std::ofstream dbstream(db_path);
 
-    //turn struct into var json type
-    jlib::json t = server;
+    // //turn struct into var json type
+    jlib::json t = server_list;
 
     if (dbstream.is_open()) {
-        //write to json
-        dbstream << t.dump(4);
-        dbstream.close();
-    }
+         //write to json
+         dbstream << t.dump(4);
+         dbstream.close();
+     }
 }
-
-
-
-
-
