@@ -14,7 +14,7 @@ namespace fs = std::filesystem;
 namespace jlib = nlohmann;
 
 
-std::string db_init(const std::string& data_dir) {
+std::string db_init() {
     std::string resource_dir = get_resource_path();
     fs::path resource_path(resource_dir);
 
@@ -39,8 +39,7 @@ Provider provider,
 std::string& version,
 std::int32_t ram,
 std::int32_t port,
-bool online_mode,
-std::string& data_dir
+bool online_mode
 ) {
 
     //get the jar path
@@ -58,7 +57,7 @@ std::string& data_dir
         port,
     };
 
-    std::string jar_link = create_container(container, data_dir,
+    std::string jar_link = create_container(container,
         online_mode, jar_path);
 
 
@@ -75,7 +74,7 @@ std::string& data_dir
     };
 
     //call db init
-    std::string db_path = db_init(data_dir);
+    std::string db_path = db_init();
     std::ofstream dbstream(db_path);
 
     //turn struct into var json type

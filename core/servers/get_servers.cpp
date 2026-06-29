@@ -40,18 +40,28 @@ jlib::json get_servers() {
     std::ifstream filestream(db_path);
 
     std::vector<serverEntity> servers;
+    std::string line;
 
     if (filestream.is_open()) {
         try {
             jlib::json j;
+
+            // Read directly from the file stream into the JSON object
             filestream >> j;
+
+            // If you still need the string representation for 'line'
+            line = j.dump();
 
             if (j.is_array()) {
                 servers = j.get<std::vector<serverEntity>>();
+                std::cout << "Loaded servers: " << servers.size() << std::endl;
             }
-        }catch (std::exception& e) {
-
         }
+        catch (const std::exception& e) {
+            // Don't leave this empty while debugging!
+            std::cerr << "JSON Error: " << e.what() << std::endl;
+        }
+        filestream.close();
     }
 
 
@@ -59,6 +69,7 @@ jlib::json get_servers() {
     jlib::json server_json = servers;
 
     std::cout << server_json.dump() << std::endl;
+    std::cout << line << std::endl;
 
     return server_json;
 
