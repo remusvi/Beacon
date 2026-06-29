@@ -54,7 +54,7 @@ class serverEntity {
     std::string status;
     Provider provider;
     std::optional<std::string> world;
-    std::optional<std::int32_t> port;
+    int port;
     std::optional<std::int32_t> ram;
     bool online_mode;
 

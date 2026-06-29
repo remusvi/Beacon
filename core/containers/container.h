@@ -15,5 +15,5 @@ public:
     std::int32_t port;
 };
 
-std::string create_container(Container& container, const std::string& data_dir, bool online_mode, const std::string& version_path);
+std::string create_container(Container& container, bool online_mode, const std::string& version_path);
 #endif //BEACON2_0_CONTAINER_H
