@@ -6,6 +6,8 @@
 #define BEACON2_0_UTILS_H
 #include <string_view>
 #include <__filesystem/path.h>
+#include "../servers/serverEntity.h"
+
 
 std::string ensure_jar_exists(const std::string& path, const std::string& version, Provider provider);
 

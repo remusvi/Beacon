@@ -24,6 +24,8 @@ set(CMAKE_USE_LIBIDN2 OFF CACHE BOOL "Disable IDN2 support for curl" FORCE)
 # ==============================================================================
 include(FetchContent)
 
+find_package(Boost REQUIRED)
+
 FetchContent_Declare(
         webview
         GIT_REPOSITORY https://github.com/webview/webview
@@ -58,10 +60,11 @@ add_executable(Beacon2_0 main.cpp
         core/utils/utils.cpp
         core/containers/containers.cpp
         core/servers/get_servers.cpp
+        core/servers/start_server.cpp
 )
 
 target_include_directories(Beacon2_0 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/interface2/dist")
-target_link_libraries(Beacon2_0 PRIVATE webview::core nlohmann_json::nlohmann_json cpr::cpr)
+target_link_libraries(Beacon2_0 PRIVATE webview::core nlohmann_json::nlohmann_json cpr::cpr Boost::boost)
 
 # Asset Compilation Step
 set(GENERATED_UI_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/interface2/dist/index_html.h")
