@@ -49,7 +49,6 @@ jlib::json get_servers() {
             // Read directly from the file stream into the JSON object
             filestream >> j;
 
-            // If you still need the string representation for 'line'
             line = j.dump();
 
             if (j.is_array()) {
@@ -58,7 +57,6 @@ jlib::json get_servers() {
             }
         }
         catch (const std::exception& e) {
-            // Don't leave this empty while debugging!
             std::cerr << "JSON Error: " << e.what() << std::endl;
         }
         filestream.close();
@@ -68,8 +66,8 @@ jlib::json get_servers() {
     //convert vec of server entities to json
     jlib::json server_json = servers;
 
-    std::cout << server_json.dump() << std::endl;
-    std::cout << line << std::endl;
+    // std::cout << server_json.dump() << std::endl;
+    // std::cout << line << std::endl;
 
     return server_json;
 

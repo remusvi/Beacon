@@ -19,7 +19,7 @@ std::string create_container(Container& container, bool online_mode, const std::
     std::string container_path = get_resource_path();
     fs::path containder_dir(container_path);
 
-    fs::path server_dir = containder_dir / container.server_id;
+    fs::path server_dir = containder_dir / "servers" /container.server_id;
 
     if (!fs::exists(server_dir)) fs::create_directories(server_dir);
 
@@ -32,12 +32,13 @@ std::string create_container(Container& container, bool online_mode, const std::
     std::ofstream eulastream(eula);
 
     if (filestream.is_open()) {
-        filestream << "max-players= 20";
-        filestream << "online-mode=" << online_mode;
-        filestream << "gamemode= survival";
+        filestream << "max-players= 20" << std::endl;
+        filestream << "online-mode=" << online_mode  << std::endl;
+        filestream << "gamemode= survival"  << std::endl;
         filestream.close();
     }
 
+    //this is simply a test
     if (eulastream.is_open()) {
         eulastream << "eula=true";
         eulastream.close();
@@ -45,7 +46,7 @@ std::string create_container(Container& container, bool online_mode, const std::
 
 
     //symlink binary
-    fs::path server(version_path);
+    fs::path server = server_dir / "server.jar";
     fs::create_symlink(version_path, server);
 
 

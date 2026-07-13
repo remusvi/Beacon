@@ -1,0 +1,26 @@
+[
+    {
+        "id": "98e3cb02-2b5e-40be-bd3e-45678d99e69f",
+        "instance_path": "/Users/adafaralph/dev/Beacon2.0/Resources/servers/98e3cb02-2b5e-40be-bd3e-45678d99e69f/server.jar",
+        "name": "Whew",
+        "online_mode": false,
+        "port": 0,
+        "provider": "Vanilla",
+        "ram": 3,
+        "status": "offline",
+        "version": "1.20.1",
+        "world": null
+    },
+    {
+        "id": "f8ecffc6-f156-41e6-96c8-bfef88fa3c0f",
+        "instance_path": "/Users/adafaralph/dev/Beacon2.0/Resources/servers/f8ecffc6-f156-41e6-96c8-bfef88fa3c0f/server.jar",
+        "name": "Whewwewew",
+        "online_mode": false,
+        "port": 0,
+        "provider": "Vanilla",
+        "ram": 3,
+        "status": "offline",
+        "version": "1.20.1",
+        "world": null
+    }
+]

@@ -1,105 +1,126 @@
 <script setup>
-import { onMounted, ref, onUnmounted, nextTick, computed, watch, reactive } from 'vue'
+import {
+    onMounted,
+    ref,
+    onUnmounted,
+    nextTick,
+    computed,
+    watch,
+    reactive,
+} from "vue";
 
 /**
  * --- PERSISTENCE & HISTORY STORAGE ---
  * Bridges Vue's reactive state with browser sessionStorage.
  */
-const STORAGE_KEY = 'BEACON_SESSION_LOGS'
+const STORAGE_KEY = "BEACON_SESSION_LOGS";
 
 const saveToHistory = (id, data) => {
     try {
-        const history = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '{}')
-        history[id] = data
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(history))
+        const history = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "{}");
+        history[id] = data;
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(history));
     } catch (e) {
-        console.error('History Save Error:', e)
+        console.error("History Save Error:", e);
     }
-}
+};
 
 const loadFromHistory = (id) => {
     try {
-        const history = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '{}')
-        return history[id] || []
+        const history = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "{}");
+        return history[id] || [];
     } catch (e) {
-        return []
+        return [];
     }
-}
+};
 
 // Initialize the global store window object if it doesn't exist
 if (!window.__BEACON_STORE__) {
     window.__BEACON_STORE__ = reactive({
         logs: {},
         activeListeners: new Set(),
-    })
+    });
 }
-const store = window.__BEACON_STORE__
+const store = window.__BEACON_STORE__;
 
-const isLoading = ref(true)
-const error = ref(null)
-const instances = ref([])
-const currentView = ref('grid')
-const activeInstance = ref(null)
-const activeMenuId = ref(null)
-const isDeploying = ref(false)
-const insDragging = ref(false)
+const isLoading = ref(true);
+const error = ref(null);
+const instances = ref([]);
+const currentView = ref("grid");
+const activeInstance = ref(null);
+const activeMenuId = ref(null);
+const isDeploying = ref(false);
+const insDragging = ref(false);
 
 // UI Deployment States
-const isCreating = ref(false)
-const newInstanceName = ref('')
-const newInstanceVersion = ref('1.20.1')
-const selectedType = ref('Vanilla')
-const memoryAlloc = ref('3G')
-const isOnlineMode = ref(false)
-const selectedFile = ref(null)
-const selectedPath = ref('')
+const isCreating = ref(false);
+const newInstanceName = ref("");
+const newInstanceVersion = ref("1.20.1");
+const selectedType = ref("Vanilla");
+const memoryAlloc = ref(3);
+const isOnlineMode = ref(false);
+const selectedFile = ref(null);
+const selectedPath = ref("");
 
 const serverTypes = [
-    { id: 'Vanilla', name: 'Vanilla', logo: '🍦', desc: 'Official Mojang Engine' },
-    { id: 'Fabric', name: 'Fabric', logo: '🧶', desc: 'Lightweight Modding' },
-    { id: 'Paper', name: 'Paper', logo: '📜', desc: 'High-Performance Spigot' },
-    { id: 'Forge', name: 'Forge', logo: '⚒️', desc: 'Heavy Modding Support' },
-]
+    {
+        id: "Vanilla",
+        name: "Vanilla",
+        logo: "🍦",
+        desc: "Official Mojang Engine",
+    },
+    { id: "Fabric", name: "Fabric", logo: "🧶", desc: "Lightweight Modding" },
+    { id: "Paper", name: "Paper", logo: "📜", desc: "High-Performance Spigot" },
+    { id: "Forge", name: "Forge", logo: "⚒️", desc: "Heavy Modding Support" },
+];
 
 // Version Utilities
 const generateVersions = () => {
-    const versions = []
-    for (let i = 1; i >= 0; i--) versions.push(`26.${i}`)
+    const versions = [];
+    for (let i = 1; i >= 0; i--) versions.push(`26.${i}`);
     for (let i = 21; i >= 8; i--) {
-        if (i === 8) versions.push('1.8.9')
-        else versions.push(`1.${i}.1`)
+        if (i === 8) versions.push("1.8.9");
+        else versions.push(`1.${i}.1`);
     }
-    return [...new Set(versions)]
-}
+    return [...new Set(versions)];
+};
 
-const allVersions = generateVersions()
+const allVersions = generateVersions();
 const compatibilityMap = {
     Vanilla: allVersions,
-    Paper: allVersions.filter((v) => !v.startsWith('26')),
-    Fabric: allVersions.filter((v) => parseFloat(v.split('.')[1]) >= 14 || v.startsWith('26')),
-    Forge: allVersions.filter((v) => parseFloat(v.split('.')[1]) >= 12 && !v.startsWith('26')),
-}
+    Paper: allVersions.filter((v) => !v.startsWith("26")),
+    Fabric: allVersions.filter(
+        (v) => parseFloat(v.split(".")[1]) >= 14 || v.startsWith("26"),
+    ),
+    Forge: allVersions.filter(
+        (v) => parseFloat(v.split(".")[1]) >= 12 && !v.startsWith("26"),
+    ),
+};
 
-const availableVersions = computed(() => compatibilityMap[selectedType.value] || [])
-const isFormValid = computed(() => newInstanceName.value.trim().length > 0 && !isDeploying.value)
+const availableVersions = computed(
+    () => compatibilityMap[selectedType.value] || [],
+);
+const isFormValid = computed(
+    () => newInstanceName.value.trim().length > 0 && !isDeploying.value,
+);
 
 watch(selectedType, (newType) => {
     if (!compatibilityMap[newType].includes(newInstanceVersion.value)) {
-        newInstanceVersion.value = compatibilityMap[newType][0]
+        newInstanceVersion.value = compatibilityMap[newType][0];
     }
-})
+});
 
 const showImport = () => {
-    currentView.value = 'import'
-}
+    currentView.value = "import";
+};
 
 const logs = computed(() => {
-    if (!activeInstance.value) return []
-    return store.logs[activeInstance.value.id] || []
-})
+    if (!activeInstance.value) return [];
+    return store.logs[activeInstance.value.id] || [];
+});
 
-const logContainer = ref(null)
-const selectedPlayer = ref(null)
+const logContainer = ref(null);
+const selectedPlayer = ref(null);
 
 /**
  * 1. Persistent Log Stream Connection with History Sync
@@ -107,96 +128,87 @@ const selectedPlayer = ref(null)
 const attachLogListener = async (id) => {
     // Hydrate from sessionStorage if the memory store is empty
     if (!store.logs[id] || store.logs[id].length === 0) {
-        store.logs[id] = loadFromHistory(id)
+        store.logs[id] = loadFromHistory(id);
     }
 
     if (!store.activeListeners.has(id)) {
         window.electron.onLogUpdate(id, (line) => {
-            if (!store.logs[id]) store.logs[id] = []
-            store.logs[id].push(line)
+            if (!store.logs[id]) store.logs[id] = [];
+            store.logs[id].push(line);
 
-            if (store.logs[id].length > 1000) store.logs[id].shift()
+            if (store.logs[id].length > 1000) store.logs[id].shift();
 
             // Throttled persistence to session history
             // We use a small timeout to avoid hammering storage on every log line
-            clearTimeout(window[`_sync_${id}`])
+            clearTimeout(window[`_sync_${id}`]);
             window[`_sync_${id}`] = setTimeout(() => {
-                saveToHistory(id, store.logs[id])
-            }, 500)
+                saveToHistory(id, store.logs[id]);
+            }, 500);
 
-            if (currentView.value === 'stats' && activeInstance.value?.id === id) {
-                scrollToBottom()
+            if (
+                currentView.value === "stats" &&
+                activeInstance.value?.id === id
+            ) {
+                scrollToBottom();
             }
-        })
-        store.activeListeners.add(id)
+        });
+        store.activeListeners.add(id);
     }
 
     try {
-        await window.electron.getLogs(id)
+        await window.electron.getLogs(id);
     } catch (err) {
-        console.error('Backend log pipe error:', err)
+        console.error("Backend log pipe error:", err);
     }
-}
-
-/**
- * 2. Cluster Sync
- */
-/**
- * 2. Cluster Sync with State Preservation
- */
+};
 const fetchServers = async () => {
-    isLoading.value = true
+    isLoading.value = true;
     try {
-        const freshData = await window.getServers()
+        const freshData = await window.getServers();
 
-        // Instead of instances.value = freshData, we map and preserve
         instances.value = freshData.map((newServer) => {
-            // Look for the existing version of this server in our current state
-            const existing = instances.value.find((s) => s.id === newServer.id)
+            const existing = instances.value.find((s) => s.id === newServer.id);
 
             if (existing) {
-                // Update the existing object properties but keep the reference
-                // This prevents Vue from "flickering" or losing local UI states
-                return { ...existing, ...newServer }
+                return { ...existing, ...newServer };
             }
-            return newServer
-        })
+            return newServer;
+        });
 
-        // Re-attach listeners only for servers that aren't already being tracked
         instances.value.forEach((server) => {
-            if (server.status?.toUpperCase() === 'RUNNING') {
-                attachLogListener(server.id)
+            if (server.status?.toUpperCase() === "RUNNING") {
+                attachLogListener(server.id);
             }
-        })
+        });
 
-        error.value = null
+        error.value = null;
     } catch (err) {
-        console.error('Fetch Error:', err)
-        error.value = 'Failed to synchronize cluster state.'
+        console.error("Fetch Error:", err);
+        error.value = "Failed to synchronize cluster state.";
     } finally {
-        isLoading.value = false
+        isLoading.value = false;
     }
-}
+};
 
 const scrollToBottom = async () => {
-    await nextTick()
+    await nextTick();
     if (logContainer.value) {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight
+        logContainer.value.scrollTop = logContainer.value.scrollHeight;
     }
-}
+};
 
 /**
  * 3. UI Actions
  */
 
 const handleDrop = async (e) => {
-    this.insDragging = false
-    const files = e.dataTransfer.files
+    this.insDragging = false;
+    const files = e.dataTransfer.files;
     if (files.length > 0) {
-        this.processFile(files[0])
-        console.logs(files)
+        this.processFile(files[0]);
+        console.logs(files);
     }
-}
+};
 
 const triggerImport = async () => {
     console.log(
@@ -205,25 +217,25 @@ const triggerImport = async () => {
         selectedType.value,
         isOnlineMode.value,
         selectedPath.value,
-    )
+    );
     try {
         const result = await window.electron.serverImport(
-            crypto.randomUUID(),
+            generateUUID(),
             newInstanceName.value,
             newInstanceVersion.value,
             selectedType.value,
             isOnlineMode.value,
             selectedPath.value,
-        )
+        );
         if (result && !result.error) {
-            isCreating.value = false
-            newInstanceName.value = ''
-            await fetchServers()
+            isCreating.value = false;
+            newInstanceName.value = "";
+            await fetchServers();
         }
     } finally {
-        isDeploying.value = false
+        isDeploying.value = false;
     }
-}
+};
 
 // const [fileHandle] = await window.showOpenFilePicker({
 //      types: [{
@@ -233,156 +245,179 @@ const triggerImport = async () => {
 //      multiple: false
 
 const updateSelection = (filePath) => {
-    const fileName = filePath.split(/[\\/]/).pop() || ''
+    const fileName = filePath.split(/[\\/]/).pop() || "";
     selectedFile.value = {
         name: fileName,
         path: filePath,
-    }
+    };
 
-    selectedPath.value = filePath
+    selectedPath.value = filePath;
 
-    console.log('Selected File Object:', selectedFile.value)
+    console.log("Selected File Object:", selectedFile.value);
 
     // 4. Automatically set the instance name if it's empty
     if (!newInstanceName.value && fileName) {
-        newInstanceName.value = fileName.replace('.zip', '')
+        newInstanceName.value = fileName.replace(".zip", "");
     }
-}
+};
 
 const browseFiles = async () => {
     try {
         // 1. Open the native OS picker via your working Electron bridge
-        const filePath = await window.electron.openZipPicker()
+        const filePath = await window.electron.openZipPicker();
 
         // 2. If the user didn't cancel and a path was returned, pass it to your selection handler
         if (filePath) {
-            updateSelection(filePath)
+            updateSelection(filePath);
         }
     } catch (err) {
         // Catch-all for unexpected IPC or OS errors
-        console.error('Failed to select file:', err)
+        console.error("Failed to select file:", err);
     }
-}
+};
 
 const handleFileDrop = (e) => {
-    isDragging.value = false
-    const file = e.dataTransfer.files[0]
+    isDragging.value = false;
+    const file = e.dataTransfer.files[0];
 
-    if (file && file.name.endsWith('.zip')) {
-        updateSelection(file)
+    if (file && file.name.endsWith(".zip")) {
+        updateSelection(file);
     }
-}
+};
 
 const openServerStats = (server) => {
-    activeInstance.value = server
-    currentView.value = 'stats'
-    attachLogListener(server.id)
-    scrollToBottom()
-}
+    activeInstance.value = server;
+    currentView.value = "stats";
+    attachLogListener(server.id);
+    scrollToBottom();
+};
 
 const closeMenu = () => {
-    currentView.value = 'grid'
-    activeInstance.value = null
-    selectedPlayer.value = null
-}
+    currentView.value = "grid";
+    activeInstance.value = null;
+    selectedPlayer.value = null;
+};
 
 const toggleStatus = async (server) => {
-    if (!server) return
-    const path = server.instance_path || server.instancePath
+    if (!server) return;
+    const path = server.instance_path || server.instancePath;
 
     try {
-        if (server.status?.toUpperCase() === 'RUNNING') {
-            server.status = 'STOPPING'
-            await window.electron.stopServer(server.id.toString())
-            server.status = 'STOPPED'
+        if (server.status?.toUpperCase() === "RUNNING") {
+            server.status = "STOPPING";
+            await window.electron.stopServer(server.id.toString());
+            server.status = "STOPPED";
             // Clear history on hard stop if desired
-            store.logs[server.id] = []
-            saveToHistory(server.id, [])
+            store.logs[server.id] = [];
+            saveToHistory(server.id, []);
         } else {
-            server.status = 'STARTING'
+            server.status = "STARTING";
             const result = await window.electron.startServer({
                 id: server.id.toString(),
                 bin_dir: path.toString(),
                 ram: parseInt(server.ram) || 3072,
-            })
+            });
 
             if (result && !result.error) {
-                server.status = 'RUNNING'
-                attachLogListener(server.id)
+                server.status = "RUNNING";
+                attachLogListener(server.id);
             } else {
-                server.status = 'ERROR'
+                server.status = "ERROR";
             }
         }
     } catch (err) {
-        server.status = 'ERROR'
+        server.status = "ERROR";
     }
+};
+
+function generateUUID() {
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+        /[xy]/g,
+        function (c) {
+            const r = (Math.random() * 16) | 0;
+            const v = c === "x" ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+        },
+    );
 }
 
 const deployInstance = async () => {
-    if (!isFormValid.value) return
-    isDeploying.value = true
+    if (!isFormValid.value) return;
+    isDeploying.value = true;
     try {
-      const result = await window.addServer(JSON.stringify({
-        id: crypto.randomUUID(),
-        name: newInstanceName.value,
-        type: selectedType.value,
-        version: newInstanceVersion.value,
-        memory: memoryAlloc.value,
-        port: 25565,
-        online: isOnlineMode.value
-      }));
+        const result = await window.addServer(
+            JSON.stringify({
+                id: generateUUID(),
+                name: newInstanceName.value,
+                type: selectedType.value,
+                version: newInstanceVersion.value,
+                memory: memoryAlloc.value,
+                port: 25565,
+                online: isOnlineMode.value,
+            }),
+        );
+
         if (result && !result.error) {
-            isCreating.value = false
-            newInstanceName.value = ''
-            await fetchServers()
+            isCreating.value = false;
+            newInstanceName.value = "";
+            await fetchServers();
         }
     } finally {
-        isDeploying.value = false
+        isDeploying.value = false;
     }
-}
+    console.log(result.JSON);
+};
 
 const deleteInstance = async (id) => {
-    if (!confirm('Permanently delete node?')) return
+    if (!confirm("Permanently delete node?")) return;
     try {
-        delete store.logs[id]
-        store.activeListeners.delete(id)
-        saveToHistory(id, null) // Wipe from storage
+        delete store.logs[id];
+        store.activeListeners.delete(id);
+        saveToHistory(id, null); // Wipe from storage
 
-        const response = await fetch('http://api.beacon.local/api/v1/servers/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id }),
-        })
+        const response = await fetch(
+            "http://api.beacon.local/api/v1/servers/delete",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id }),
+            },
+        );
         if (response.ok) {
-            activeMenuId.value = null
-            instances.value = instances.value.filter((s) => s.id !== id)
+            activeMenuId.value = null;
+            instances.value = instances.value.filter((s) => s.id !== id);
         }
     } catch (err) {
-        console.error(err)
+        console.error(err);
     }
-}
+};
 
-const toggleMenu = (id) => (activeMenuId.value = activeMenuId.value === id ? null : id)
-const closeMenus = () => (activeMenuId.value = null)
+const toggleMenu = (id) =>
+    (activeMenuId.value = activeMenuId.value === id ? null : id);
+const closeMenus = () => (activeMenuId.value = null);
 
 onMounted(async () => {
     if (instances.value.length > 0) {
-        isLoading.value = false
+        isLoading.value = false;
     }
 
-    await fetchServers()
-    window.addEventListener('click', closeMenus)
-})
+    await fetchServers();
+    window.addEventListener("click", closeMenus);
+});
 
 onUnmounted(() => {
-    window.removeEventListener('click', closeMenus)
-})
+    window.removeEventListener("click", closeMenus);
+});
 </script>
 
 <template>
     <div class="dashboard-container">
         <transition name="pop">
-            <div v-if="isCreating" class="modal-overlay" @click.self="isCreating = false">
+            <div
+                v-if="isCreating"
+                class="modal-overlay"
+                @click.self="isCreating = false"
+            >
                 <div class="modal-glass">
                     <span class="section-label">Initialize Node</span>
                     <h2 class="deploy-instance">Deploy New Instance</h2>
@@ -409,8 +444,12 @@ onUnmounted(() => {
                             >
                                 <div class="type-logo">{{ type.logo }}</div>
                                 <div class="type-info">
-                                    <span class="type-name">{{ type.name }}</span>
-                                    <span class="type-desc">{{ type.desc }}</span>
+                                    <span class="type-name">{{
+                                        type.name
+                                    }}</span>
+                                    <span class="type-desc">{{
+                                        type.desc
+                                    }}</span>
                                 </div>
                             </div>
                         </div>
@@ -419,39 +458,63 @@ onUnmounted(() => {
                     <div class="form-row">
                         <div class="input-stack half">
                             <label>Engine Version</label>
-                            <select v-model="newInstanceVersion" class="fancy-input">
-                                <option v-for="v in availableVersions" :key="v" :value="v">
+                            <select
+                                v-model="newInstanceVersion"
+                                class="fancy-input"
+                            >
+                                <option
+                                    v-for="v in availableVersions"
+                                    :key="v"
+                                    :value="v"
+                                >
                                     {{ v }}
                                 </option>
                             </select>
                         </div>
                         <div class="input-stack half">
-                            <label>RAM Allocation</label>
+                            <label>RAM Allocation(GB)</label>
                             <select v-model="memoryAlloc" class="fancy-input">
-                                <option>2G</option>
-                                <option>3G</option>
-                                <option>4G</option>
-                                <option>8G</option>
+                                <option>2</option>
+                                <option>3</option>
+                                <option>4</option>
+                                <option>8</option>
                             </select>
                         </div>
                     </div>
 
-                    <div class="toggle-stack" @click="isOnlineMode = !isOnlineMode">
+                    <div
+                        class="toggle-stack"
+                        @click="isOnlineMode = !isOnlineMode"
+                    >
                         <div class="toggle-info">
                             <span class="toggle-label">Online Mode</span>
-                            <span class="toggle-desc">Require official Mojang authentication</span>
+                            <span class="toggle-desc"
+                                >Require official Mojang authentication</span
+                            >
                         </div>
-                        <div class="toggle-switch" :class="{ on: isOnlineMode }"></div>
+                        <div
+                            class="toggle-switch"
+                            :class="{ on: isOnlineMode }"
+                        ></div>
                     </div>
 
                     <div class="modal-actions">
-                        <button class="btn-secondary" @click="isCreating = false">Cancel</button>
+                        <button
+                            class="btn-secondary"
+                            @click="isCreating = false"
+                        >
+                            Cancel
+                        </button>
                         <button
                             class="primary-btn sparkle-hover"
                             :disabled="!isFormValid"
                             @click="deployInstance"
                         >
-                            {{ isDeploying ? 'Provisioning...' : 'Start Deployment' }}
+                            {{
+                                isDeploying
+                                    ? "Provisioning..."
+                                    : "Start Deployment"
+                            }}
                         </button>
                     </div>
                 </div>
@@ -468,13 +531,18 @@ onUnmounted(() => {
                     <button class="btn-secondary" @click="showImport">
                         <span class="icon">📥</span> Import Server
                     </button>
-                    <button class="primary-btn sparkle-hover" @click="isCreating = true">
+                    <button
+                        class="primary-btn sparkle-hover"
+                        @click="isCreating = true"
+                    >
                         <span class="plus">✦</span> New Instance
                     </button>
                 </div>
             </header>
 
-            <div v-if="isLoading" class="status-msg">Synchronizing Cluster Data...</div>
+            <div v-if="isLoading" class="status-msg">
+                Synchronizing Cluster Data...
+            </div>
             <div v-else-if="error" class="status-msg error">{{ error }}</div>
 
             <div v-else class="server-grid">
@@ -492,22 +560,35 @@ onUnmounted(() => {
                             </div>
 
                             <div class="context-container" @click.stop>
-                                <button class="btn-dots" @click="toggleMenu(server.id)">•••</button>
+                                <button
+                                    class="btn-dots"
+                                    @click="toggleMenu(server.id)"
+                                >
+                                    •••
+                                </button>
                                 <transition name="pop">
-                                    <div v-if="activeMenuId === server.id" class="dropdown-menu">
+                                    <div
+                                        v-if="activeMenuId === server.id"
+                                        class="dropdown-menu"
+                                    >
                                         <button
                                             class="menu-item delete"
                                             @click="deleteInstance(server.id)"
                                         >
-                                            <span class="icon">🗑️</span> Delete Instance
+                                            <span class="icon">🗑️</span> Delete
+                                            Instance
                                         </button>
                                     </div>
                                 </transition>
                             </div>
 
                             <div class="badge-group">
-                                <span class="version-badge">{{ server.version }}</span>
-                                <span class="type-badge">{{ server.type }}</span>
+                                <span class="version-badge">{{
+                                    server.version
+                                }}</span>
+                                <span class="type-badge">{{
+                                    server.type
+                                }}</span>
                             </div>
                         </div>
 
@@ -518,12 +599,15 @@ onUnmounted(() => {
 
                         <div class="metrics">
                             <div class="metric-labels">
-                                <span>CPU Usage</span><span>{{ server.cpu_usage || 0 }}%</span>
+                                <span>CPU Usage</span
+                                ><span>{{ server.cpu_usage || 0 }}%</span>
                             </div>
                             <div class="progress-bg">
                                 <div
                                     class="progress-fill"
-                                    :style="{ width: (server.cpu_usage || 0) + '%' }"
+                                    :style="{
+                                        width: (server.cpu_usage || 0) + '%',
+                                    }"
                                 ></div>
                             </div>
                         </div>
@@ -534,9 +618,16 @@ onUnmounted(() => {
                                 :class="server.status?.toLowerCase()"
                                 @click="toggleStatus(server)"
                             >
-                                {{ server.status === 'RUNNING' ? 'STOP' : 'START' }}
+                                {{
+                                    server.status === "RUNNING"
+                                        ? "STOP"
+                                        : "START"
+                                }}
                             </button>
-                            <button class="btn-secondary" @click="openServerStats(server)">
+                            <button
+                                class="btn-secondary"
+                                @click="openServerStats(server)"
+                            >
                                 CONSOLE
                             </button>
                         </div>
@@ -555,17 +646,25 @@ onUnmounted(() => {
             </div>
         </div>
 
-        <div v-if="currentView === 'stats'" class="view-layer stats-view-container">
+        <div
+            v-if="currentView === 'stats'"
+            class="view-layer stats-view-container"
+        >
             <header class="dashboard-header">
                 <div class="title-section">
                     <h1>Instance Control</h1>
                     <p>
-                        Project Beacon / <span class="active-node">{{ activeInstance?.name }}</span>
+                        Project Beacon /
+                        <span class="active-node">{{
+                            activeInstance?.name
+                        }}</span>
                     </p>
                 </div>
 
                 <div class="header-actions">
-                    <button class="btn-secondary" @click="closeMenu">Return to Dashboard</button>
+                    <button class="btn-secondary" @click="closeMenu">
+                        Return to Dashboard
+                    </button>
                 </div>
             </header>
 
@@ -573,7 +672,11 @@ onUnmounted(() => {
                 <div class="terminal-column">
                     <span class="section-label">Live System Output</span>
                     <div class="log-terminal" ref="logContainer">
-                        <div v-for="(line, index) in logs" :key="index" class="log-line">
+                        <div
+                            v-for="(line, index) in logs"
+                            :key="index"
+                            class="log-line"
+                        >
                             <span class="line-number">{{ index + 1 }}</span>
                             <span class="content">{{ line }}</span>
                         </div>
@@ -586,7 +689,9 @@ onUnmounted(() => {
                 <div class="player-sidebar">
                     <div class="sticky-sidebar-content">
                         <span class="section-label"
-                            >Connected Users ({{ activeInstance?.players?.length || 0 }})</span
+                            >Connected Users ({{
+                                activeInstance?.players?.length || 0
+                            }})</span
                         >
                         <div class="player-list">
                             <div
@@ -599,21 +704,34 @@ onUnmounted(() => {
                                     {{ player.name.charAt(0).toUpperCase() }}
                                 </div>
                                 <div class="player-meta">
-                                    <span class="player-name">{{ player.name }}</span>
-                                    <span class="player-ping">{{ player.ping }}ms ping</span>
+                                    <span class="player-name">{{
+                                        player.name
+                                    }}</span>
+                                    <span class="player-ping"
+                                        >{{ player.ping }}ms ping</span
+                                    >
                                 </div>
                             </div>
 
-                            <div v-if="!activeInstance?.players?.length" class="empty-state-mini">
+                            <div
+                                v-if="!activeInstance?.players?.length"
+                                class="empty-state-mini"
+                            >
                                 No active sessions detected.
                             </div>
                         </div>
 
                         <transition name="pop">
-                            <div v-if="selectedPlayer" class="player-detail-card">
+                            <div
+                                v-if="selectedPlayer"
+                                class="player-detail-card"
+                            >
                                 <div class="detail-header">
                                     <h3>{{ selectedPlayer.name }}</h3>
-                                    <button @click="selectedPlayer = null" class="close-btn">
+                                    <button
+                                        @click="selectedPlayer = null"
+                                        class="close-btn"
+                                    >
                                         ×
                                     </button>
                                 </div>
@@ -623,7 +741,12 @@ onUnmounted(() => {
                                         <div class="mini-progress">
                                             <div
                                                 class="fill health"
-                                                :style="{ width: selectedPlayer.health * 5 + '%' }"
+                                                :style="{
+                                                    width:
+                                                        selectedPlayer.health *
+                                                            5 +
+                                                        '%',
+                                                }"
                                             ></div>
                                         </div>
                                     </div>
@@ -631,7 +754,8 @@ onUnmounted(() => {
                                         <label>Experience</label>
                                         <div class="xp-row">
                                             <span class="xp-lv"
-                                                >LVL {{ selectedPlayer.level }}</span
+                                                >LVL
+                                                {{ selectedPlayer.level }}</span
                                             >
                                         </div>
                                     </div>
@@ -643,13 +767,21 @@ onUnmounted(() => {
             </div>
         </div>
 
-        <div v-if="currentView === 'import'" class="view-layer import-view-container modal-overlay">
+        <div
+            v-if="currentView === 'import'"
+            class="view-layer import-view-container modal-overlay"
+        >
             <transition name="pop">
                 <div class="modal-glass import-body">
                     <header class="modal-header">
                         <h2>Import New Server</h2>
                     </header>
-                    <button @click="closeMenu" class="btn-secondary import-view-back">Back</button>
+                    <button
+                        @click="closeMenu"
+                        class="btn-secondary import-view-back"
+                    >
+                        Back
+                    </button>
                     <div class="import-pane">
                         <div
                             class="drop-zone"
@@ -664,20 +796,33 @@ onUnmounted(() => {
                                     Drag server file here or
                                     <span @click="browseFiles">browse</span>
                                 </p>
-                                <p v-else><strong>Selected:</strong> {{ selectedFile.name }}</p>
+                                <p v-else>
+                                    <strong>Selected:</strong>
+                                    {{ selectedFile.name }}
+                                </p>
                             </div>
                         </div>
 
                         <div class="form-group input-stack">
                             <label>Server Alias</label>
-                            <input v-model="newInstanceName" class="fancy-input" />
+                            <input
+                                v-model="newInstanceName"
+                                class="fancy-input"
+                            />
                         </div>
 
                         <div class="form-row">
                             <div class="input-stack half">
                                 <label>Engine Version</label>
-                                <select v-model="newInstanceVersion" class="fancy-input">
-                                    <option v-for="v in availableVersions" :key="v" :value="v">
+                                <select
+                                    v-model="newInstanceVersion"
+                                    class="fancy-input"
+                                >
+                                    <option
+                                        v-for="v in availableVersions"
+                                        :key="v"
+                                        :value="v"
+                                    >
                                         {{ v }}
                                     </option>
                                 </select>
@@ -688,21 +833,36 @@ onUnmounted(() => {
                                             v-for="type in serverTypes"
                                             :key="type.id"
                                             class="type-box"
-                                            :class="{ active: selectedType === type.id }"
+                                            :class="{
+                                                active:
+                                                    selectedType === type.id,
+                                            }"
                                             @click="selectedType = type.id"
                                         >
-                                            <div class="type-logo">{{ type.logo }}</div>
+                                            <div class="type-logo">
+                                                {{ type.logo }}
+                                            </div>
                                             <div class="type-info">
-                                                <span class="type-name">{{ type.name }}</span>
-                                                <span class="type-desc">{{ type.desc }}</span>
+                                                <span class="type-name">{{
+                                                    type.name
+                                                }}</span>
+                                                <span class="type-desc">{{
+                                                    type.desc
+                                                }}</span>
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="toggle-stack" @click="isOnlineMode = !isOnlineMode">
+                                    <div
+                                        class="toggle-stack"
+                                        @click="isOnlineMode = !isOnlineMode"
+                                    >
                                         <div class="toggle-info">
-                                            <span class="toggle-label">Online Mode</span>
+                                            <span class="toggle-label"
+                                                >Online Mode</span
+                                            >
                                             <span class="toggle-desc"
-                                                >Require official Mojang authentication</span
+                                                >Require official Mojang
+                                                authentication</span
                                             >
                                         </div>
                                         <div
@@ -714,7 +874,9 @@ onUnmounted(() => {
                             </div>
                         </div>
                     </div>
-                    <button class="primary-btn" @click="triggerImport()">Import Instance</button>
+                    <button class="primary-btn" @click="triggerImport()">
+                        Import Instance
+                    </button>
                 </div>
             </transition>
         </div>
@@ -775,7 +937,8 @@ drop-zone.is-dragging {
     max-width: 1400px;
     margin: 0 auto;
     color: #1d1d1f;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     min-height: 100vh;
 }
 .dashboard-header {
@@ -1156,7 +1319,7 @@ h1 {
     transition: 0.3s;
 }
 .toggle-switch::after {
-    content: '';
+    content: "";
     position: absolute;
     top: 2px;
     left: 2px;
@@ -1206,7 +1369,7 @@ h1 {
     overflow-y: auto;
     overflow-x: hidden;
     color: #32d74b;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: "JetBrains Mono", monospace;
     font-size: 0.85rem;
     border: 1px solid #30363d;
     box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
@@ -1245,7 +1408,7 @@ h1 {
 }
 
 .section-label {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: "JetBrains Mono", monospace;
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 1.5px;

@@ -1,9 +1,21 @@
+#include <cstdint>
 #include <iostream>
 #include <string>
+#include "build/_deps/json-src/include/nlohmann/json_fwd.hpp"
 #include "webview.h"
 #include "index_html.h"
 #include "core/servers/servers.h"
 #include "./core/servers/serverEntity.h"
+
+Provider determine_provider(const std::string& type_str) {
+    if (type_str == "vanilla" || "Vanilla") return Provider::Vanilla;
+    if (type_str == "forge")   return Provider::Forge;
+    if (type_str == "fabric")  return Provider::Fabric;
+    if (type_str == "paper")   return Provider::Paper;
+
+    throw std::runtime_error("Unknown provider type: " + type_str);
+}
+
 
 int main() {
     webview::webview main_window(true, nullptr);
@@ -24,20 +36,25 @@ int main() {
 
         main_window.bind("addServer", [](const std::string& req) -> std::string{
 
-            auto server_data = jlib::json::parse(req);
+             auto data = jlib::json::parse(req);
+             auto server_data = jlib::json::parse(data[0].get<std::string>());
+             std::cout << server_data << std::endl;
 
-            std::string id    = server_data["uuid"];
+            std::string id    = server_data["id"];
             std::string name    = server_data["name"];
             std::string version = server_data["version"];
-            int memory          = server_data["memory"];
-            int port            = server_data["port"];
+            std::int32_t memory          = server_data["memory"];
+            std::int32_t port            = server_data["port"];
             bool online         = server_data["online"];
 
             std::string type_str = server_data["type"];
-            Provider provider = (type_str == "vanilla") ? Provider::Vanilla : Provider::Forge;
 
-            std::cout << id << std::endl;
-            add_server(id, name, provider, version, memory, port, online);
+
+
+            Provider provider = determine_provider(type_str);
+
+
+            add_server(id, name, provider, version, memory,port, online);
 
             return "Ok";
         });
