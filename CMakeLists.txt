@@ -4,11 +4,8 @@ project(Beacon2_0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ==============================================================================
-# 1. macOS Homebrew Path Fixes (CRITICAL: Must be BEFORE FetchContent)
-# ==============================================================================
+
 if(APPLE)
-    # Tell CMake's internal find_package routines to look in Homebrew paths
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
 
     # Prepend global search directories for any nested targets like Curl
@@ -16,12 +13,10 @@ if(APPLE)
     link_directories(/opt/homebrew/lib)
 endif()
 
-# Force internal curl dependencies to explicitly check Homebrew or turn off unneeded features
 set(CMAKE_USE_LIBIDN2 OFF CACHE BOOL "Disable IDN2 support for curl" FORCE)
 
-# ==============================================================================
-# 2. Dependencies
-# ==============================================================================
+
+
 include(FetchContent)
 
 find_package(Boost REQUIRED)
@@ -50,9 +45,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cpr)
 
-# ==============================================================================
-# 3. Main Executable & Build Pipeline
-# ==============================================================================
 add_executable(Beacon2_0 main.cpp
         core/servers/servers.h
         core/servers/add_server.cpp
