@@ -61,6 +61,8 @@ int main() {
     }catch (std::exception& e) {
         std::cerr << e.what() << std::endl;
     }
+    std::string i = "1234";
+    start_server(i);
     main_window.run();
     return 0;
 }
