@@ -19,4 +19,6 @@ bool online_mode);
 
 jlib::json get_servers();
 
+void start_server(std::string& server_id);
+
 #endif //BEACON2_0_SERVERS_H
