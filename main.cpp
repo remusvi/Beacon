@@ -62,7 +62,8 @@ int main() {
         std::cerr << e.what() << std::endl;
     }
     std::string i = "1234";
-    start_server(i);
+    std::string& t = i;
+    start_server(t);
     main_window.run();
     return 0;
 }
