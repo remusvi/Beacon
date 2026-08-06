@@ -302,31 +302,47 @@ const toggleStatus = async (server) => {
     if (!server) return;
     const path = server.instance_path || server.instancePath;
 
-    try {
-        if (server.status?.toUpperCase() === "RUNNING") {
-            server.status = "STOPPING";
-            await window.electron.stopServer(server.id.toString());
-            server.status = "STOPPED";
-            // Clear history on hard stop if desired
-            store.logs[server.id] = [];
-            saveToHistory(server.id, []);
-        } else {
-            server.status = "STARTING";
-            const result = await window.electron.startServer({
-                id: server.id.toString(),
-                bin_dir: path.toString(),
-                ram: parseInt(server.ram) || 3072,
-            });
+    // try {
+    //     if (server.status?.toUpperCase() === "RUNNING") {
+    //         server.status = "STOPPING";
+    //         await window.electron.stopServer(server.id.toString());
+    //         server.status = "STOPPED";
+    //         // Clear history on hard stop if desired
+    //         store.logs[server.id] = [];
+    //         saveToHistory(server.id, []);
+    //     } else {
+    //         server.status = "STARTING";
+    //         // const result = await window.electron.startServer({
+    //         //     id: server.id.toString(),
+    //         //     bin_dir: path.toString(),
+    //         //     ram: parseInt(server.ram) || 3072,
+    //         // });
+    //         //
+    //       const result = await window.startServer(
+    //         server.id
+    //       )
 
-            if (result && !result.error) {
-                server.status = "RUNNING";
-                attachLogListener(server.id);
-            } else {
-                server.status = "ERROR";
-            }
-        }
-    } catch (err) {
-        server.status = "ERROR";
+    //       }
+
+    //         if (result && !result.error) {
+    //             server.status = "RUNNING";
+    //             attachLogListener(server.id);
+    //         } else {
+    //             server.status = "ERROR";
+    //         }
+    //     }
+    // } catch (err) {
+    //     server.status = "ERROR";
+    // }
+    //
+    //
+  try {
+    const res = await window.startServer(
+      //console.log("starting server"),
+      server.id.toString()
+    )
+  } catch (err) {
+    server.status = "ERROR"
     }
 };
 
