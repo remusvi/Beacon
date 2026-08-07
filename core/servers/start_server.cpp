@@ -1,8 +1,10 @@
 #include "../utils/utils.h"
 #include <string>
 #include <filesystem>
+#include <boost/process.hpp>
 
 namespace fs = std::filesystem;
+namespace bp = bost::process;
 
 void start_server(int &server_id){
     //find server first
@@ -11,6 +13,7 @@ void start_server(int &server_id){
     fs::path binary_dir = resource_dir / "servers"/ server_id / "server.jar";
 
     //spawn server.jar subprocess
+
 
 
 }
