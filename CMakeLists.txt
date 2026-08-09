@@ -1,25 +1,26 @@
 cmake_minimum_required(VERSION 3.16)
 project(Beacon2_0 LANGUAGES CXX)
 
+# Quiet policy CMP0167 warning and use CMake's modern Boost target discovery
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-
 if(APPLE)
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
-
-    # Prepend global search directories for any nested targets like Curl
     include_directories(SYSTEM /opt/homebrew/include)
     link_directories(/opt/homebrew/lib)
 endif()
 
 set(CMAKE_USE_LIBIDN2 OFF CACHE BOOL "Disable IDN2 support for curl" FORCE)
 
-
-
 include(FetchContent)
 
-find_package(Boost REQUIRED)
+# 1. Ask for the process component specifically
+find_package(Boost REQUIRED COMPONENTS process)
 
 FetchContent_Declare(
         webview
@@ -56,7 +57,15 @@ add_executable(Beacon2_0 main.cpp
 )
 
 target_include_directories(Beacon2_0 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/interface2/dist")
-target_link_libraries(Beacon2_0 PRIVATE webview::core nlohmann_json::nlohmann_json cpr::cpr Boost::boost)
+
+# 2. Link Boost::process (this supplies the v2 process/error symbol binaries)
+target_link_libraries(Beacon2_0 PRIVATE
+    webview::core
+    nlohmann_json::nlohmann_json
+    cpr::cpr
+    Boost::headers
+    Boost::process
+)
 
 # Asset Compilation Step
 set(GENERATED_UI_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/interface2/dist/index_html.h")
