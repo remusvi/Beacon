@@ -22,5 +22,17 @@
         "status": "offline",
         "version": "1.20.1",
         "world": null
+    },
+    {
+        "id": "ff2ea20e-eacc-407c-aca2-2d15660826fd",
+        "instance_path": "/Users/adafaralph/dev/Beacon2.0/Resources/servers/ff2ea20e-eacc-407c-aca2-2d15660826fd/server.jar",
+        "name": "version test",
+        "online_mode": false,
+        "port": 0,
+        "provider": "Vanilla",
+        "ram": 3,
+        "status": "offline",
+        "version": "1.17.1",
+        "world": null
     }
 ]
