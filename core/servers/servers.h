@@ -3,11 +3,13 @@
 //
 #include "nlohmann/json.hpp"
 #include "./serverEntity.h"
+#include <string.h>
 
 namespace jlib = nlohmann;
 #ifndef BEACON2_0_SERVERS_H
 #define BEACON2_0_SERVERS_H
 
+void start_server(const std::string& server_id);
 
 void add_server(std::string& id,
 std::string& name,
@@ -19,6 +21,5 @@ bool online_mode);
 
 jlib::json get_servers();
 
-void start_server(std::string& server_id);
 
 #endif //BEACON2_0_SERVERS_H

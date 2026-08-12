@@ -6,7 +6,7 @@
 #include "index_html.h"
 #include "core/servers/servers.h"
 #include "./core/servers/serverEntity.h"
-
+//is there a better way to do this?
 Provider determine_provider(const std::string& type_str) {
     if (type_str == "vanilla" || "Vanilla") return Provider::Vanilla;
     if (type_str == "forge")   return Provider::Forge;
@@ -28,6 +28,17 @@ int main() {
 
 
     try {
+
+        main_window.bind("startServer", [](const std::string& req) -> std::string {
+
+            auto data = jlib::json::parse(req);
+
+            std::string server_id = data[0].get<std::string>();
+
+            std::cout << req << std::endl;
+            start_server(server_id);
+        });
+
         main_window.bind("getServers", [](const std::string& req) -> std::string {
             nlohmann::json servers = get_servers().dump();
 
@@ -61,9 +72,10 @@ int main() {
     }catch (std::exception& e) {
         std::cerr << e.what() << std::endl;
     }
-    std::string i = "1234";
-    std::string& t = i;
-    start_server(t);
+
+
+    // std::string i = "56eb1aac-eb5c-497e-8843-355264cbdedd";
+    // std::string& t = i;
     main_window.run();
     return 0;
 }

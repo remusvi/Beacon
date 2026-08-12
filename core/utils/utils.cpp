@@ -15,7 +15,6 @@
 std::error_code ec;
 namespace fs = std::filesystem;
 
-// Removed empty globals. Better to keep paths localized or passed cleanly.
 
 std::string get_resource_path() {
     fs::path my_path = fs::current_path();
