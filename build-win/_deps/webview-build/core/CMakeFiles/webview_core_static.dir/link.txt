@@ -1,0 +1,2 @@
+/opt/homebrew/bin/x86_64-w64-mingw32-ar qc libwebview.a CMakeFiles/webview_core_static.dir/src/webview.cc.obj
+/opt/homebrew/bin/x86_64-w64-mingw32-ranlib libwebview.a
