@@ -6,7 +6,7 @@
 #include <boost/process/v1.hpp>
 
 namespace fs = std::filesystem;
-namespace bp = boost::process::v1; // Note: point namespace alias directly to v1
+namespace bp = boost::process::v1;
 
 void start_server( const std::string& server_id) {
     std::string resource_path = get_resource_path();

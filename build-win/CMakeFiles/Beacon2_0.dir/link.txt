@@ -1,0 +1,3 @@
+/opt/homebrew/bin/cmake -E rm -f CMakeFiles/Beacon2_0.dir/objects.a
+/opt/homebrew/bin/x86_64-w64-mingw32-ar qc CMakeFiles/Beacon2_0.dir/objects.a @CMakeFiles/Beacon2_0.dir/objects1.rsp
+/opt/homebrew/bin/x86_64-w64-mingw32-g++ -O3 -DNDEBUG -Wl,--whole-archive CMakeFiles/Beacon2_0.dir/objects.a -Wl,--no-whole-archive -o Beacon2_0.exe -Wl,--out-implib,libBeacon2_0.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles/Beacon2_0.dir/linkLibs.rsp

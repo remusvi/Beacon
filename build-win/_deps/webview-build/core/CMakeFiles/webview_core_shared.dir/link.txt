@@ -1,0 +1,3 @@
+/opt/homebrew/bin/cmake -E rm -f CMakeFiles/webview_core_shared.dir/objects.a
+/opt/homebrew/bin/x86_64-w64-mingw32-ar qc CMakeFiles/webview_core_shared.dir/objects.a @CMakeFiles/webview_core_shared.dir/objects1.rsp
+/opt/homebrew/bin/x86_64-w64-mingw32-g++ -O3 -DNDEBUG -shared -o libwebview.dll -Wl,--out-implib,libwebview.dll.a -Wl,--major-image-version,0,--minor-image-version,12 -Wl,--whole-archive CMakeFiles/webview_core_shared.dir/objects.a -Wl,--no-whole-archive @CMakeFiles/webview_core_shared.dir/linkLibs.rsp
