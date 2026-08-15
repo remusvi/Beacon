@@ -4,13 +4,14 @@
 
 #ifndef BEACON2_0_UTILS_H
 #define BEACON2_0_UTILS_H
+#include <string>
 #include <string_view>
-#include <__filesystem/path.h>
+#include <filesystem>
 #include "../servers/serverEntity.h"
 
 
 std::string ensure_jar_exists(const std::string& path, const std::string& version, Provider provider);
 
-std::filesystem::path get_resource_path();
+std::string get_resource_path();
 
 #endif //BEACON2_0_UTILS_H
