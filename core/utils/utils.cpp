@@ -111,7 +111,7 @@ std::string ensure_jar_exists(const std::string& path, const std::string& versio
                 break;
             }
             default:
-                throw std::runtime_error("Unsupported provider");
+                throw std::runtime_error("Currently, only Vanilla servers are supported for automated downloading. Fabric, Paper, and Forge support will be available soon.");
         }
             if (!download_url.empty()) {
                     std::cout << "Downloading from: " << download_url << std::endl;

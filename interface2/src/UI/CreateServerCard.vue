@@ -52,7 +52,7 @@
     <footer class="modal-footer">
       <button class="btn-cancel" @click="$emit('close')">Cancel</button>
       <button class="btn-deploy" @click="handleDeploy">
-        <span class="sparkle">✦</span> Initialize Deployment
+        <Sparkles :size="16" class="sparkle" /> Initialize Deployment
       </button>
     </footer>
   </div>
@@ -60,6 +60,7 @@
 
 <script setup>
 import { ref } from 'vue'
+import { Sparkles } from 'lucide-vue-next'
 
 const platforms = [
   { id: 1, name: 'Vanilla', icon: 'https://p7.hiclipart.com/preview/835/10/446/minecraft-grass-block-video-game-pixel-art-grass.jpg' },

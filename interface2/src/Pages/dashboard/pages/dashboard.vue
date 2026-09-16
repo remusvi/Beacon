@@ -8,6 +8,29 @@ import {
     watch,
     reactive,
 } from "vue";
+import {
+    Box,
+    Layers,
+    FileCode,
+    Hammer,
+    Download,
+    Plus,
+    Trash2,
+    Users,
+    Crown,
+    ShieldCheck,
+    ShieldAlert,
+    LogOut,
+    Ban,
+    FileText,
+    X,
+    Check,
+    ArrowLeft,
+    Terminal,
+    Send,
+    MoreVertical,
+    Server,
+} from "lucide-vue-next";
 
 /**
  * --- PERSISTENCE & HISTORY STORAGE ---
@@ -66,12 +89,12 @@ const serverTypes = [
     {
         id: "Vanilla",
         name: "Vanilla",
-        logo: "🍦",
+        logo: Box,
         desc: "Official Mojang Engine",
     },
-    { id: "Fabric", name: "Fabric", logo: "🧶", desc: "Lightweight Modding" },
-    { id: "Paper", name: "Paper", logo: "📜", desc: "High-Performance Spigot" },
-    { id: "Forge", name: "Forge", logo: "⚒️", desc: "Heavy Modding Support" },
+    { id: "Fabric", name: "Fabric", logo: Layers, desc: "Lightweight Modding" },
+    { id: "Paper", name: "Paper", logo: FileCode, desc: "High-Performance Spigot" },
+    { id: "Forge", name: "Forge", logo: Hammer, desc: "Heavy Modding Support" },
 ];
 
 // Version Utilities
@@ -116,51 +139,191 @@ const showImport = () => {
 
 const logs = computed(() => {
     if (!activeInstance.value) return [];
-    return store.logs[activeInstance.value.id] || [];
+    return consoleLogs.value.length ? consoleLogs.value : (store.logs[activeInstance.value.id] || []);
 });
 
 const logContainer = ref(null);
 const selectedPlayer = ref(null);
+const serverPlayers = ref([]);
+const consoleLogs = ref([]);
+const consoleCommand = ref("");
+const quickOpName = ref("");
+const actionMessage = ref("");
+let statsPollInterval = null;
 
-/**
- * 1. Persistent Log Stream Connection with History Sync
- */
-const attachLogListener = async (id) => {
-    // Hydrate from sessionStorage if the memory store is empty
-    if (!store.logs[id] || store.logs[id].length === 0) {
-        store.logs[id] = loadFromHistory(id);
-    }
+const showFeedback = (msg) => {
+    actionMessage.value = msg;
+    setTimeout(() => {
+        if (actionMessage.value === msg) {
+            actionMessage.value = "";
+        }
+    }, 4500);
+};
 
-    if (!store.activeListeners.has(id)) {
-        window.electron.onLogUpdate(id, (line) => {
-            if (!store.logs[id]) store.logs[id] = [];
-            store.logs[id].push(line);
-
-            if (store.logs[id].length > 1000) store.logs[id].shift();
-
-            // Throttled persistence to session history
-            // We use a small timeout to avoid hammering storage on every log line
-            clearTimeout(window[`_sync_${id}`]);
-            window[`_sync_${id}`] = setTimeout(() => {
-                saveToHistory(id, store.logs[id]);
-            }, 500);
-
-            if (
-                currentView.value === "stats" &&
-                activeInstance.value?.id === id
-            ) {
-                scrollToBottom();
-            }
-        });
-        store.activeListeners.add(id);
-    }
-
+const refreshServerData = async (id) => {
+    if (!id) return;
     try {
-        await window.electron.getLogs(id);
+        if (window.getServerPlayers) {
+            const rawPlayers = await window.getServerPlayers(id.toString());
+            const parsed = typeof rawPlayers === "string" ? JSON.parse(rawPlayers) : rawPlayers;
+            serverPlayers.value = Array.isArray(parsed) ? parsed : [];
+            if (activeInstance.value && activeInstance.value.id === id) {
+                activeInstance.value.players = serverPlayers.value;
+            }
+        }
+        if (window.getServerLogs) {
+            const rawLogs = await window.getServerLogs(id.toString(), 200);
+            const parsed = typeof rawLogs === "string" ? JSON.parse(rawLogs) : rawLogs;
+            if (Array.isArray(parsed)) {
+                consoleLogs.value = parsed;
+                store.logs[id] = parsed;
+            }
+        }
     } catch (err) {
-        console.error("Backend log pipe error:", err);
+        console.error("Error refreshing server data:", err);
     }
 };
+
+const startStatsPolling = (id) => {
+    stopStatsPolling();
+    refreshServerData(id);
+    statsPollInterval = setInterval(() => {
+        if (currentView.value === "stats" && activeInstance.value?.id === id) {
+            refreshServerData(id);
+        } else {
+            stopStatsPolling();
+        }
+    }, 1500);
+};
+
+const stopStatsPolling = () => {
+    if (statsPollInterval) {
+        clearInterval(statsPollInterval);
+        statsPollInterval = null;
+    }
+};
+
+const handleOpPlayer = async (player) => {
+    if (!activeInstance.value || !player) return;
+    try {
+        if (window.opPlayer) {
+            const res = await window.opPlayer(activeInstance.value.id.toString(), player.name);
+            const data = typeof res === "string" ? JSON.parse(res) : res;
+            if (data.status === "ok") {
+                player.isOp = true;
+                showFeedback(`Granted Operator status to ${player.name}`);
+            } else {
+                showFeedback(`Failed to OP: ${data.error || "Unknown error"}`);
+            }
+        }
+        await refreshServerData(activeInstance.value.id);
+    } catch (err) {
+        showFeedback(`Error: ${err.message || err}`);
+    }
+};
+
+const handleDeopPlayer = async (player) => {
+    if (!activeInstance.value || !player) return;
+    try {
+        if (window.deopPlayer) {
+            const res = await window.deopPlayer(activeInstance.value.id.toString(), player.name);
+            const data = typeof res === "string" ? JSON.parse(res) : res;
+            if (data.status === "ok") {
+                player.isOp = false;
+                showFeedback(`Revoked Operator status from ${player.name}`);
+            } else {
+                showFeedback(`Failed to de-op: ${data.error || "Unknown error"}`);
+            }
+        }
+        await refreshServerData(activeInstance.value.id);
+    } catch (err) {
+        showFeedback(`Error: ${err.message || err}`);
+    }
+};
+
+const handleKickPlayer = async (player) => {
+    if (!activeInstance.value || !player) return;
+    const reason = window.prompt(`Kick ${player.name} with reason:`, "Kicked by operator");
+    if (reason === null) return;
+    try {
+        if (window.kickPlayer) {
+            const res = await window.kickPlayer(activeInstance.value.id.toString(), player.name, reason);
+            const data = typeof res === "string" ? JSON.parse(res) : res;
+            if (data.status === "ok") {
+                showFeedback(`Kicked ${player.name} (${reason})`);
+                if (selectedPlayer.value?.name === player.name) {
+                    selectedPlayer.value = null;
+                }
+            } else {
+                showFeedback(`Failed to kick: ${data.error || "Unknown error"}`);
+            }
+        }
+        await refreshServerData(activeInstance.value.id);
+    } catch (err) {
+        showFeedback(`Error: ${err.message || err}`);
+    }
+};
+
+const handleBanPlayer = async (player) => {
+    if (!activeInstance.value || !player) return;
+    const reason = window.prompt(`Ban ${player.name} with reason:`, "Banned by operator");
+    if (reason === null) return;
+    try {
+        if (window.banPlayer) {
+            const res = await window.banPlayer(activeInstance.value.id.toString(), player.name, reason);
+            const data = typeof res === "string" ? JSON.parse(res) : res;
+            if (data.status === "ok") {
+                showFeedback(`Banned ${player.name} (${reason})`);
+                if (selectedPlayer.value?.name === player.name) {
+                    selectedPlayer.value = null;
+                }
+            } else {
+                showFeedback(`Failed to ban: ${data.error || "Unknown error"}`);
+            }
+        }
+        await refreshServerData(activeInstance.value.id);
+    } catch (err) {
+        showFeedback(`Error: ${err.message || err}`);
+    }
+};
+
+const handleQuickOp = async () => {
+    const name = quickOpName.value.trim();
+    if (!name || !activeInstance.value) return;
+    try {
+        if (window.opPlayer) {
+            const res = await window.opPlayer(activeInstance.value.id.toString(), name);
+            const data = typeof res === "string" ? JSON.parse(res) : res;
+            if (data.status === "ok") {
+                showFeedback(`Granted Operator status to ${name}`);
+                quickOpName.value = "";
+            } else {
+                showFeedback(`Error: ${data.error || "Could not OP player"}`);
+            }
+        }
+        await refreshServerData(activeInstance.value.id);
+    } catch (err) {
+        showFeedback(`Error: ${err.message || err}`);
+    }
+};
+
+const sendConsoleCmd = async () => {
+    const cmd = consoleCommand.value.trim();
+    if (!cmd || !activeInstance.value) return;
+    try {
+        if (window.sendServerCommand) {
+            await window.sendServerCommand(activeInstance.value.id.toString(), cmd);
+            consoleCommand.value = "";
+            setTimeout(() => {
+                refreshServerData(activeInstance.value.id);
+                scrollToBottom();
+            }, 300);
+        }
+    } catch (err) {
+        console.error("Send command error:", err);
+    }
+};
+
 const fetchServers = async () => {
     isLoading.value = true;
     try {
@@ -175,11 +338,16 @@ const fetchServers = async () => {
             return newServer;
         });
 
-        instances.value.forEach((server) => {
-            if (server.status?.toUpperCase() === "RUNNING") {
-                attachLogListener(server.id);
+        // Also fetch players for running servers
+        for (const server of instances.value) {
+            if (server.status?.toUpperCase() === "RUNNING" && window.getServerPlayers) {
+                try {
+                    const raw = await window.getServerPlayers(server.id.toString());
+                    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+                    server.players = Array.isArray(parsed) ? parsed : [];
+                } catch (_) {}
             }
-        });
+        }
 
         error.value = null;
     } catch (err) {
@@ -202,11 +370,10 @@ const scrollToBottom = async () => {
  */
 
 const handleDrop = async (e) => {
-    this.insDragging = false;
+    insDragging.value = false;
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-        this.processFile(files[0]);
-        console.logs(files);
+        console.log(files);
     }
 };
 
@@ -288,61 +455,42 @@ const handleFileDrop = (e) => {
 const openServerStats = (server) => {
     activeInstance.value = server;
     currentView.value = "stats";
-    attachLogListener(server.id);
+    serverPlayers.value = server.players || [];
+    consoleLogs.value = store.logs[server.id] || [];
+    selectedPlayer.value = null;
+    actionMessage.value = "";
+    startStatsPolling(server.id);
     scrollToBottom();
 };
 
 const closeMenu = () => {
+    stopStatsPolling();
     currentView.value = "grid";
     activeInstance.value = null;
     selectedPlayer.value = null;
+    actionMessage.value = "";
 };
 
 const toggleStatus = async (server) => {
     if (!server) return;
-    const path = server.instance_path || server.instancePath;
-
-    // try {
-    //     if (server.status?.toUpperCase() === "RUNNING") {
-    //         server.status = "STOPPING";
-    //         await window.electron.stopServer(server.id.toString());
-    //         server.status = "STOPPED";
-    //         // Clear history on hard stop if desired
-    //         store.logs[server.id] = [];
-    //         saveToHistory(server.id, []);
-    //     } else {
-    //         server.status = "STARTING";
-    //         // const result = await window.electron.startServer({
-    //         //     id: server.id.toString(),
-    //         //     bin_dir: path.toString(),
-    //         //     ram: parseInt(server.ram) || 3072,
-    //         // });
-    //         //
-    //       const result = await window.startServer(
-    //         server.id
-    //       )
-
-    //       }
-
-    //         if (result && !result.error) {
-    //             server.status = "RUNNING";
-    //             attachLogListener(server.id);
-    //         } else {
-    //             server.status = "ERROR";
-    //         }
-    //     }
-    // } catch (err) {
-    //     server.status = "ERROR";
-    // }
-    //
-    //
-  try {
-    const res = await window.startServer(
-      //console.log("starting server"),
-      server.id.toString()
-    )
-  } catch (err) {
-    server.status = "ERROR"
+    try {
+        if (server.status?.toUpperCase() === "RUNNING") {
+            server.status = "STOPPING";
+            if (window.stopServer) {
+                await window.stopServer(server.id.toString());
+            }
+            server.status = "OFFLINE";
+        } else {
+            server.status = "STARTING";
+            if (window.startServer) {
+                await window.startServer(server.id.toString());
+            }
+            server.status = "RUNNING";
+        }
+        await fetchServers();
+    } catch (err) {
+        console.error("Toggle server status error:", err);
+        server.status = "ERROR";
     }
 };
 
@@ -361,51 +509,89 @@ const deployInstance = async () => {
     if (!isFormValid.value) return;
     isDeploying.value = true;
     try {
-        const result = await window.addServer(
-            JSON.stringify({
-                id: generateUUID(),
-                name: newInstanceName.value,
-                type: selectedType.value,
-                version: newInstanceVersion.value,
-                memory: memoryAlloc.value,
-                port: 25565,
-                online: isOnlineMode.value,
-            }),
-        );
+        const payload = JSON.stringify({
+            id: generateUUID(),
+            name: newInstanceName.value,
+            type: selectedType.value,
+            version: newInstanceVersion.value,
+            memory: Number(memoryAlloc.value) || 3,
+            port: 25565,
+            online: isOnlineMode.value,
+        });
+
+        const rawResult = await window.addServer(payload);
+        const result = typeof rawResult === "string" ? JSON.parse(rawResult) : rawResult;
 
         if (result && !result.error) {
             isCreating.value = false;
             newInstanceName.value = "";
             await fetchServers();
+        } else if (result?.error) {
+            alert(result.error);
         }
+    } catch (err) {
+        console.error("Provisioning error:", err);
+        alert("Failed to provision instance: " + (err.message || err));
     } finally {
         isDeploying.value = false;
     }
-    console.log(result.JSON);
 };
 
-const deleteInstance = async (id) => {
-    if (!confirm("Permanently delete node?")) return;
-    try {
-        delete store.logs[id];
-        store.activeListeners.delete(id);
-        saveToHistory(id, null); // Wipe from storage
+const deleteModalOpen = ref(false);
+const serverToDelete = ref(null);
+const isDeleting = ref(false);
 
-        const response = await fetch(
-            "http://api.beacon.local/api/v1/servers/delete",
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id }),
-            },
-        );
-        if (response.ok) {
-            activeMenuId.value = null;
-            instances.value = instances.value.filter((s) => s.id !== id);
+const requestDeleteInstance = (server) => {
+    activeMenuId.value = null;
+    serverToDelete.value = server;
+    deleteModalOpen.value = true;
+};
+
+const cancelDelete = () => {
+    if (isDeleting.value) return;
+    deleteModalOpen.value = false;
+    serverToDelete.value = null;
+};
+
+const confirmDeleteInstance = async () => {
+    if (!serverToDelete.value) return;
+    const target = serverToDelete.value;
+    const targetId = target.id;
+    isDeleting.value = true;
+
+    try {
+        if (activeInstance.value?.id === targetId) {
+            stopStatsPolling();
+            activeInstance.value = null;
+            selectedPlayer.value = null;
+            currentView.value = "grid";
         }
+
+        delete store.logs[targetId];
+        store.activeListeners.delete(targetId);
+        saveToHistory(targetId, null);
+
+        if (window.deleteServer) {
+            await window.deleteServer(targetId.toString());
+        }
+
+        instances.value = instances.value.filter((s) => s.id !== targetId);
+        await fetchServers();
+
+        showFeedback(`Successfully deleted instance "${target.name}"`);
+        deleteModalOpen.value = false;
+        serverToDelete.value = null;
     } catch (err) {
-        console.error(err);
+        console.error("Delete instance error:", err);
+        showFeedback(`Failed to delete instance: ${err.message || err}`);
+    } finally {
+        isDeleting.value = false;
     }
+};
+
+const deleteInstance = (id) => {
+    const s = instances.value.find((inst) => inst.id === id) || (activeInstance.value?.id === id ? activeInstance.value : { id, name: "Node #" + id });
+    requestDeleteInstance(s);
 };
 
 const toggleMenu = (id) =>
@@ -422,6 +608,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+    stopStatsPolling();
     window.removeEventListener("click", closeMenus);
 });
 </script>
@@ -458,7 +645,9 @@ onUnmounted(() => {
                                 :class="{ active: selectedType === type.id }"
                                 @click="selectedType = type.id"
                             >
-                                <div class="type-logo">{{ type.logo }}</div>
+                                <div class="type-logo">
+                                    <component :is="type.logo" :size="24" />
+                                </div>
                                 <div class="type-info">
                                     <span class="type-name">{{
                                         type.name
@@ -545,13 +734,13 @@ onUnmounted(() => {
                 </div>
                 <div class="header-actions" style="display: flex; gap: 12px">
                     <button class="btn-secondary" @click="showImport">
-                        <span class="icon">📥</span> Import Server
+                        <Download :size="15" class="btn-inline-icon" /> Import Server
                     </button>
                     <button
                         class="primary-btn sparkle-hover"
                         @click="isCreating = true"
                     >
-                        <span class="plus">✦</span> New Instance
+                        <Plus :size="15" class="btn-inline-icon" /> New Instance
                     </button>
                 </div>
             </header>
@@ -579,8 +768,9 @@ onUnmounted(() => {
                                 <button
                                     class="btn-dots"
                                     @click="toggleMenu(server.id)"
+                                    title="Options"
                                 >
-                                    •••
+                                    <MoreVertical :size="15" />
                                 </button>
                                 <transition name="pop">
                                     <div
@@ -589,9 +779,9 @@ onUnmounted(() => {
                                     >
                                         <button
                                             class="menu-item delete"
-                                            @click="deleteInstance(server.id)"
+                                            @click="requestDeleteInstance(server)"
                                         >
-                                            <span class="icon">🗑️</span> Delete
+                                            <Trash2 :size="14" class="icon" /> Delete
                                             Instance
                                         </button>
                                     </div>
@@ -609,8 +799,13 @@ onUnmounted(() => {
                         </div>
 
                         <div class="server-info">
-                            <h3>{{ server.name }}</h3>
-                            <code>{{ server.address }}</code>
+                            <div class="server-title-row">
+                                <h3>{{ server.name }}</h3>
+                                <span v-if="server.status === 'RUNNING'" class="player-count-badge">
+                                    <Users :size="12" class="player-badge-icon" /> {{ server.players?.length || 0 }} online
+                                </span>
+                            </div>
+                            <code>{{ server.address || ('localhost:' + (server.port || 25565)) }}</code>
                         </div>
 
                         <div class="metrics">
@@ -644,14 +839,14 @@ onUnmounted(() => {
                                 class="btn-secondary"
                                 @click="openServerStats(server)"
                             >
-                                CONSOLE
+                                {{ server.status === "RUNNING" ? "PLAYERS & CONSOLE" : "CONSOLE" }}
                             </button>
                         </div>
                     </div>
                 </div>
 
                 <div class="card create-card" @click="isCreating = true">
-                    <div class="plus-icon">✦</div>
+                    <div class="plus-icon"><Plus :size="32" /></div>
                     <div class="create-text">
                         <h3>Deploy Instance</h3>
                         <p href="#" class="import-text" @click="showImport">
@@ -674,19 +869,31 @@ onUnmounted(() => {
                         <span class="active-node">{{
                             activeInstance?.name
                         }}</span>
+                        <span v-if="activeInstance?.status === 'RUNNING'" class="pill-running">RUNNING</span>
+                        <span v-else class="pill-offline">OFFLINE</span>
                     </p>
                 </div>
 
-                <div class="header-actions">
+                <div class="header-actions" style="display: flex; gap: 10px; align-items: center;">
+                    <button
+                        class="btn-danger-outline"
+                        @click="requestDeleteInstance(activeInstance)"
+                        title="Delete this server instance"
+                    >
+                        <Trash2 :size="15" /> Delete Server
+                    </button>
                     <button class="btn-secondary" @click="closeMenu">
-                        Return to Dashboard
+                        <ArrowLeft :size="15" /> Back to Dashboard
                     </button>
                 </div>
             </header>
 
             <div class="stats-layout">
                 <div class="terminal-column">
-                    <span class="section-label">Live System Output</span>
+                    <div class="terminal-title-bar">
+                        <span class="section-label">Live System Output</span>
+                        <button class="btn-clear-term" @click="consoleLogs = []" title="Clear Console">Clear</button>
+                    </div>
                     <div class="log-terminal" ref="logContainer">
                         <div
                             v-for="(line, index) in logs"
@@ -697,43 +904,101 @@ onUnmounted(() => {
                             <span class="content">{{ line }}</span>
                         </div>
                         <div v-if="logs.length === 0" class="log-placeholder">
-                            Awaiting data from container socket...
+                            Awaiting logs from Minecraft server process...
                         </div>
+                    </div>
+                    <div class="terminal-cmd-bar">
+                        <span class="cmd-prompt">&gt;</span>
+                        <input
+                            v-model="consoleCommand"
+                            @keyup.enter="sendConsoleCmd"
+                            placeholder="Type a server command (e.g. op <player>, kick <player>, say <msg>)..."
+                            class="cmd-input"
+                        />
+                        <button
+                            class="cmd-send-btn"
+                            @click="sendConsoleCmd"
+                            :disabled="!consoleCommand.trim()"
+                        >
+                            <Send :size="14" /> Send
+                        </button>
                     </div>
                 </div>
 
                 <div class="player-sidebar">
                     <div class="sticky-sidebar-content">
-                        <span class="section-label"
-                            >Connected Users ({{
-                                activeInstance?.players?.length || 0
-                            }})</span
-                        >
+                        <div class="sidebar-header-row">
+                            <span class="section-label"
+                                >Players Online ({{
+                                    serverPlayers.length
+                                }})</span
+                            >
+                            <span v-if="activeInstance?.status === 'RUNNING'" class="live-pulse">LIVE</span>
+                        </div>
+
+                        <transition name="pop">
+                            <div v-if="actionMessage" class="action-feedback">
+                                {{ actionMessage }}
+                            </div>
+                        </transition>
+
+                        <div v-if="activeInstance?.status === 'RUNNING'" class="quick-op-wrapper">
+                            <input
+                                v-model="quickOpName"
+                                placeholder="Player to OP..."
+                                class="quick-op-field"
+                                @keyup.enter="handleQuickOp"
+                            />
+                            <button
+                                class="btn-quick-op"
+                                @click="handleQuickOp"
+                                :disabled="!quickOpName.trim()"
+                            >
+                                <ShieldCheck :size="14" /> OP
+                            </button>
+                        </div>
+
                         <div class="player-list">
                             <div
-                                v-for="player in activeInstance?.players"
-                                :key="player.uuid"
+                                v-for="player in serverPlayers"
+                                :key="player.uuid || player.name"
                                 class="player-row"
+                                :class="{ active: selectedPlayer?.name === player.name, 'is-op': player.isOp }"
                                 @click="selectedPlayer = player"
                             >
-                                <div class="player-avatar">
-                                    {{ player.name.charAt(0).toUpperCase() }}
+                                <div class="player-avatar-box">
+                                    <img
+                                        :src="`https://mc-heads.net/avatar/${player.name}/48`"
+                                        class="player-avatar-img"
+                                        :alt="player.name"
+                                        @error="(e) => { e.target.src = `https://minotar.net/avatar/${player.name}/48`; }"
+                                    />
+                                    <span v-if="player.isOp" class="crown-badge" title="Server Operator">
+                                        <Crown :size="11" />
+                                    </span>
                                 </div>
                                 <div class="player-meta">
-                                    <span class="player-name">{{
-                                        player.name
-                                    }}</span>
-                                    <span class="player-ping"
-                                        >{{ player.ping }}ms ping</span
-                                    >
+                                    <div class="player-title-row">
+                                        <span class="player-name">{{ player.name }}</span>
+                                        <span v-if="player.isOp" class="op-badge">OP</span>
+                                    </div>
+                                    <span class="player-ping">{{ player.ping || 20 }}ms ping</span>
                                 </div>
+                                <span class="player-arrow">›</span>
                             </div>
 
                             <div
-                                v-if="!activeInstance?.players?.length"
+                                v-if="!serverPlayers.length"
                                 class="empty-state-mini"
                             >
-                                No active sessions detected.
+                                <div class="empty-icon"><Users :size="36" /></div>
+                                <div class="empty-title">No players online</div>
+                                <p class="empty-desc" v-if="activeInstance?.status === 'RUNNING'">
+                                    Connect in Minecraft at <code>{{ activeInstance?.address || ('localhost:' + (activeInstance?.port || 25565)) }}</code>
+                                </p>
+                                <p class="empty-desc" v-else>
+                                    Start server to allow players to join.
+                                </p>
                             </div>
                         </div>
 
@@ -743,38 +1008,58 @@ onUnmounted(() => {
                                 class="player-detail-card"
                             >
                                 <div class="detail-header">
-                                    <h3>{{ selectedPlayer.name }}</h3>
+                                    <div class="detail-profile">
+                                        <img
+                                            :src="`https://mc-heads.net/avatar/${selectedPlayer.name}/64`"
+                                            class="detail-avatar-img"
+                                            :alt="selectedPlayer.name"
+                                            @error="(e) => { e.target.src = `https://minotar.net/avatar/${selectedPlayer.name}/64`; }"
+                                        />
+                                        <div class="detail-info">
+                                            <div class="detail-name-line">
+                                                <h3>{{ selectedPlayer.name }}</h3>
+                                                <span v-if="selectedPlayer.isOp" class="op-badge">OP</span>
+                                            </div>
+                                            <code class="detail-uuid">{{ selectedPlayer.uuid }}</code>
+                                        </div>
+                                    </div>
                                     <button
                                         @click="selectedPlayer = null"
                                         class="close-btn"
                                     >
-                                        ×
+                                        <X :size="16" />
                                     </button>
                                 </div>
-                                <div class="detail-body">
-                                    <div class="stat-item">
-                                        <label>Vitality</label>
-                                        <div class="mini-progress">
-                                            <div
-                                                class="fill health"
-                                                :style="{
-                                                    width:
-                                                        selectedPlayer.health *
-                                                            5 +
-                                                        '%',
-                                                }"
-                                            ></div>
-                                        </div>
-                                    </div>
-                                    <div class="stat-item">
-                                        <label>Experience</label>
-                                        <div class="xp-row">
-                                            <span class="xp-lv"
-                                                >LVL
-                                                {{ selectedPlayer.level }}</span
-                                            >
-                                        </div>
-                                    </div>
+
+                                <div class="player-actions-group">
+                                    <button
+                                        v-if="!selectedPlayer.isOp"
+                                        class="action-btn give-op"
+                                        @click="handleOpPlayer(selectedPlayer)"
+                                    >
+                                        <ShieldCheck :size="15" /> Give Operator
+                                    </button>
+                                    <button
+                                        v-else
+                                        class="action-btn revoke-op"
+                                        @click="handleDeopPlayer(selectedPlayer)"
+                                    >
+                                        <ShieldAlert :size="15" /> Revoke Operator
+                                    </button>
+
+                                    <button
+                                        class="action-btn kick-player"
+                                        @click="handleKickPlayer(selectedPlayer)"
+                                    >
+                                        <LogOut :size="15" /> Kick Player
+                                    </button>
+
+                                    <button
+                                        class="action-btn ban-player"
+                                        @click="handleBanPlayer(selectedPlayer)"
+                                    >
+                                        <Ban :size="15" /> Ban Player
+                                    </button>
                                 </div>
                             </div>
                         </transition>
@@ -807,7 +1092,7 @@ onUnmounted(() => {
                             @drop.prevent="handleFileDrop"
                         >
                             <div class="drop-content">
-                                <i class="upload-icon">📄</i>
+                                <FileText :size="36" class="upload-icon" />
                                 <p v-if="!selectedFile">
                                     Drag server file here or
                                     <span @click="browseFiles">browse</span>
@@ -856,7 +1141,7 @@ onUnmounted(() => {
                                             @click="selectedType = type.id"
                                         >
                                             <div class="type-logo">
-                                                {{ type.logo }}
+                                                <component :is="type.logo" :size="24" />
                                             </div>
                                             <div class="type-info">
                                                 <span class="type-name">{{
@@ -896,6 +1181,76 @@ onUnmounted(() => {
                 </div>
             </transition>
         </div>
+
+        <!-- Delete Confirmation Modal -->
+        <transition name="pop">
+            <div
+                v-if="deleteModalOpen"
+                class="modal-overlay"
+                @click.self="cancelDelete"
+            >
+                <div class="modal-glass">
+                    <span class="section-label">Server Management</span>
+                    <h2 class="deploy-instance">Delete Instance</h2>
+
+                    <div class="input-stack">
+                        <label>Node Identity</label>
+                        <div class="fancy-input server-delete-preview">
+                            <div class="delete-instance-info">
+                                <span class="delete-instance-name">{{ serverToDelete?.name }}</span>
+                                <span class="delete-instance-meta">
+                                    {{ serverToDelete?.type }} {{ serverToDelete?.version }} • Port {{ serverToDelete?.port || 25565 }}
+                                </span>
+                            </div>
+                            <span
+                                v-if="serverToDelete?.status === 'RUNNING'"
+                                class="pill-running"
+                            >
+                                RUNNING
+                            </span>
+                            <span v-else class="pill-offline">
+                                OFFLINE
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="input-stack">
+                        <label>Confirmation</label>
+                        <p class="delete-desc">
+                            Are you sure you want to permanently delete this instance? All server files, world data, player inventories, and configuration files will be permanently erased. This action cannot be undone.
+                        </p>
+                    </div>
+
+                    <div
+                        v-if="serverToDelete?.status === 'RUNNING'"
+                        class="toggle-stack running-notice"
+                    >
+                        <div class="toggle-info">
+                            <span class="toggle-label">Active Process</span>
+                            <span class="toggle-desc">The server is currently running and will be stopped before deletion.</span>
+                        </div>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button
+                            class="btn-secondary"
+                            @click="cancelDelete"
+                            :disabled="isDeleting"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            class="primary-btn danger-btn"
+                            @click="confirmDeleteInstance"
+                            :disabled="isDeleting"
+                        >
+                            <Trash2 :size="16" />
+                            <span>{{ isDeleting ? "Deleting..." : "Delete Instance" }}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </transition>
     </div>
 </template>
 
@@ -1366,7 +1721,7 @@ h1 {
 }
 .stats-layout {
     display: grid;
-    grid-template-columns: 1fr 320px;
+    grid-template-columns: 1fr 340px;
     gap: 30px;
     flex-grow: 1;
     min-height: 0;
@@ -1376,12 +1731,31 @@ h1 {
     flex-direction: column;
     gap: 12px;
 }
+.terminal-title-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.btn-clear-term {
+    background: transparent;
+    border: 1px solid #484f58;
+    color: #8b949e;
+    padding: 3px 10px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.btn-clear-term:hover {
+    color: #f0f6fc;
+    border-color: #8b949e;
+}
 
 .log-terminal {
     background: #1d1d1f;
     border-radius: 24px;
     padding: 25px;
-    height: calc(100vh - 250px);
+    height: calc(100vh - 300px);
     overflow-y: auto;
     overflow-x: hidden;
     color: #32d74b;
@@ -1412,6 +1786,52 @@ h1 {
     font-style: italic;
 }
 
+.terminal-cmd-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 14px;
+    padding: 6px 14px;
+}
+.cmd-prompt {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 800;
+    color: #32d74b;
+    user-select: none;
+}
+.cmd-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #f0f6fc;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    outline: none;
+}
+.cmd-input::placeholder {
+    color: #484f58;
+}
+.cmd-send-btn {
+    background: #238636;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-weight: 700;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.cmd-send-btn:hover:not(:disabled) {
+    background: #2ea043;
+}
+.cmd-send-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 .player-sidebar {
     position: relative;
 }
@@ -1420,7 +1840,70 @@ h1 {
     top: 20px;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
+}
+
+.sidebar-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.live-pulse {
+    background: rgba(50, 215, 75, 0.2);
+    color: #32d74b;
+    border: 1px solid #32d74b;
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 10px;
+    letter-spacing: 1px;
+}
+
+.action-feedback {
+    background: #1c2128;
+    border: 1px solid #388bfd;
+    color: #58a6ff;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.quick-op-wrapper {
+    display: flex;
+    gap: 8px;
+}
+.quick-op-field {
+    flex: 1;
+    background: #1c2128;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 8px 12px;
+    color: #f0f6fc;
+    font-size: 0.8rem;
+    outline: none;
+}
+.quick-op-field:focus {
+    border-color: #58a6ff;
+}
+.btn-quick-op {
+    background: #f1c40f;
+    color: #1a1a1a;
+    border: none;
+    border-radius: 12px;
+    padding: 8px 12px;
+    font-weight: 800;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: 0.2s;
+    white-space: nowrap;
+}
+.btn-quick-op:hover:not(:disabled) {
+    background: #f39c12;
+}
+.btn-quick-op:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 .section-label {
@@ -1435,89 +1918,258 @@ h1 {
 .player-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    max-height: 400px;
+    gap: 10px;
+    max-height: 380px;
     overflow-y: auto;
     padding-right: 5px;
 }
 .player-row {
     display: flex;
     align-items: center;
-    gap: 15px;
-    padding: 15px;
+    gap: 12px;
+    padding: 12px 14px;
     background: white;
-    border-radius: 20px;
+    border-radius: 16px;
     cursor: pointer;
-    border: 1px solid transparent;
+    border: 2px solid transparent;
     transition: 0.2s;
 }
 .player-row:hover {
     border-color: #0071e3;
-    transform: translateX(5px);
+    transform: translateX(4px);
 }
-.player-avatar {
+.player-row.is-op {
+    border-left: 4px solid #f1c40f;
+}
+.player-row.active {
+    border-color: #0071e3;
+    background: #f0f7ff;
+}
+
+.player-avatar-box {
+    position: relative;
     width: 36px;
     height: 36px;
-    background: #0071e3;
-    color: white;
-    border-radius: 10px;
+    flex-shrink: 0;
+}
+.player-avatar-img {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    object-fit: cover;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    image-rendering: pixelated;
+}
+.crown-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    font-size: 0.8rem;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+}
+
+.player-meta {
+    flex: 1;
+    min-width: 0;
+}
+.player-title-row {
     display: flex;
     align-items: center;
-    justify-content: center;
-    font-weight: 900;
+    gap: 6px;
 }
 .player-name {
-    display: block;
     font-weight: 700;
     font-size: 0.9rem;
+    color: #1d1d1f;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.op-badge {
+    background: #f1c40f;
+    color: #1a1a1a;
+    font-size: 0.65rem;
+    font-weight: 900;
+    padding: 1px 6px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
 }
 .player-ping {
     font-size: 0.7rem;
     color: #86868b;
+    display: block;
+}
+.player-arrow {
+    font-size: 1.2rem;
+    color: #86868b;
+    font-weight: 700;
+}
+
+.empty-state-mini {
+    padding: 25px 15px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 18px;
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+}
+.empty-icon {
+    font-size: 2rem;
+    margin-bottom: 6px;
+}
+.empty-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #f0f6fc;
+}
+.empty-desc {
+    font-size: 0.75rem;
+    color: #86868b;
+    margin-top: 6px;
+}
+.empty-desc code {
+    color: #32d74b;
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 6px;
 }
 
 .player-detail-card {
     background: white;
-    padding: 20px;
-    border-radius: 24px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.05);
+    padding: 18px;
+    border-radius: 20px;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
     border: 1px solid #f5f5f7;
 }
 .detail-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 15px;
+    align-items: flex-start;
+    margin-bottom: 12px;
 }
-.detail-header h3 {
+.detail-profile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.detail-avatar-img {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    image-rendering: pixelated;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+}
+.detail-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.detail-name-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.detail-name-line h3 {
     margin: 0;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
+    color: #1d1d1f;
+}
+.detail-uuid {
+    font-size: 0.65rem;
+    color: #86868b;
+    word-break: break-all;
+    max-width: 170px;
+    display: block;
 }
 .close-btn {
     background: none;
     border: none;
-    font-size: 1.5rem;
+    font-size: 1.4rem;
     cursor: pointer;
     color: #86868b;
+    line-height: 1;
 }
-.mini-progress {
-    height: 8px;
-    background: #f5f5f7;
+
+.player-actions-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+.action-btn {
+    padding: 9px 12px;
     border-radius: 10px;
-    overflow: hidden;
-    margin-top: 5px;
-}
-.fill.health {
-    background: #ff3b30;
-    height: 100%;
-}
-.xp-row {
-    margin-top: 5px;
-}
-.xp-lv {
-    font-weight: 800;
-    color: #32d74b;
+    border: none;
+    font-weight: 700;
     font-size: 0.8rem;
+    cursor: pointer;
+    transition: 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+.action-btn.give-op {
+    background: #f1c40f;
+    color: #1a1a1a;
+}
+.action-btn.give-op:hover {
+    background: #f39c12;
+}
+.action-btn.revoke-op {
+    background: #6c757d;
+    color: white;
+}
+.action-btn.revoke-op:hover {
+    background: #5a6268;
+}
+.action-btn.kick-player {
+    background: #ff9800;
+    color: white;
+}
+.action-btn.kick-player:hover {
+    background: #e68a00;
+}
+.action-btn.ban-player {
+    background: #dc3545;
+    color: white;
+}
+.action-btn.ban-player:hover {
+    background: #c82333;
+}
+
+.server-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.player-count-badge {
+    background: rgba(50, 215, 75, 0.15);
+    color: #32d74b;
+    border: 1px solid rgba(50, 215, 75, 0.3);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+.pill-running {
+    background: #32d74b;
+    color: #0b2210;
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+.pill-offline {
+    background: #86868b;
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: 8px;
+    vertical-align: middle;
 }
 
 .pop-enter-active {
@@ -1545,5 +2197,95 @@ h1 {
 .primary-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* --- Delete Confirmation Modal & Danger Zone Styles --- */
+.server-delete-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.delete-instance-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.delete-instance-name {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fffffc;
+}
+.delete-instance-meta {
+    font-size: 0.75rem;
+    color: #86868b;
+    font-family: "JetBrains Mono", monospace;
+}
+.delete-desc {
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: #86868b;
+    margin: 0;
+}
+.running-notice {
+    cursor: default;
+    margin-top: 15px;
+}
+.primary-btn.danger-btn {
+    background: #ff3b30;
+}
+.primary-btn.danger-btn:hover:not(:disabled) {
+    background: #e03228;
+}
+.btn-danger-outline {
+    background: #f5f5f7;
+    color: #ff3b30;
+    border: none;
+    font-weight: 700;
+    border-radius: 14px;
+    cursor: pointer;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: 0.2s;
+}
+.btn-danger-outline:hover {
+    background: #fff1f0;
+}
+
+/* Button & Badge icon alignments */
+.btn-inline-icon {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+.player-badge-icon {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+.btn-quick-op {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+.cmd-send-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+.crown-badge {
+    color: #ffd60a;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 </style>

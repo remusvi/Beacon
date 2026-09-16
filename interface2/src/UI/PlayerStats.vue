@@ -13,7 +13,7 @@
         <div class="vital-row">
           <label>Health</label>
           <div class="heart-container">
-            <span v-for="i in 10" :key="i" class="heart" :class="{ empty: i > player.health / 2 }">❤️</span>
+            <Heart v-for="i in 10" :key="i" class="heart-icon" :class="{ filled: i <= player.health / 2, empty: i > player.health / 2 }" :size="18" />
           </div>
         </div>
 
@@ -35,6 +35,18 @@
   </div>
 </template>
 
+<script setup>
+import { Heart } from 'lucide-vue-next';
+
+defineProps({
+  player: {
+    type: Object,
+    required: true
+  }
+});
+defineEmits(['close']);
+</script>
+
 <style scoped>
 .player-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; z-index: 2000; }
 .player-modal { background: #fff; width: 450px; padding: 40px; border-radius: 35px; box-shadow: 0 30px 60px rgba(0,0,0,0.15); }
@@ -42,8 +54,9 @@
 .player-profile { display: flex; align-items: center; gap: 20px; margin-bottom: 30px; }
 .player-body { height: 120px; filter: drop-shadow(0 10px 10px rgba(0,0,0,0.1)); }
 
-.heart-container { display: flex; gap: 2px; font-size: 1.2rem; }
-.heart.empty { filter: grayscale(1) opacity(0.3); }
+.heart-container { display: flex; gap: 4px; align-items: center; }
+.heart-icon.filled { color: #ff3b30; fill: #ff3b30; }
+.heart-icon.empty { color: #d1d1d6; fill: transparent; opacity: 0.4; }
 
 .xp-bar { height: 8px; background: #eee; border-radius: 10px; overflow: hidden; margin-top: 5px; }
 .xp-fill { height: 100%; background: #32d74b; box-shadow: 0 0 10px #32d74b; }

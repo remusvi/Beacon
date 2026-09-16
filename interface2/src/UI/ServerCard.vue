@@ -8,7 +8,9 @@
           <span class="pulse-dot" :class="server.status"></span>
           <span class="status-text">{{ server.status }}</span>
         </div>
-        <button class="settings-gear">⚙</button>
+        <button class="settings-gear" aria-label="Settings">
+          <Settings :size="16" />
+        </button>
       </div>
 
       <h3 class="server-name">{{ server.name }}</h3>
@@ -34,6 +36,8 @@
 </template>
 
 <script setup>
+import { Settings } from 'lucide-vue-next';
+
 defineProps({
   server: {
     type: Object,
