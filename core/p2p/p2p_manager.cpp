@@ -29,11 +29,19 @@ P2PManager& P2PManager::instance() {
     return mgr;
 }
 
-P2PManager::P2PManager() = default;
+P2PManager::P2PManager() {
+#ifdef _WIN32
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+#endif
+}
 
 P2PManager::~P2PManager() {
     stop_host();
     leave_session();
+#ifdef _WIN32
+    WSACleanup();
+#endif
 }
 
 std::string P2PManager::generate_room_code() {
@@ -91,18 +99,22 @@ std::string P2PManager::discover_public_endpoint(uint16_t local_port) {
 
     uint8_t buf[512];
     struct sockaddr_in from{};
+#ifdef _WIN32
+    int from_len = sizeof(from);
+#else
     socklen_t from_len = sizeof(from);
-    ssize_t len = recvfrom(sock, (char*)buf, sizeof(buf), 0, (struct sockaddr*)&from, &from_len);
+#endif
+    auto len = recvfrom(sock, (char*)buf, sizeof(buf), 0, (struct sockaddr*)&from, &from_len);
 
     std::string mapped_endpoint;
     if (len >= 20 && buf[0] == 0x01 && buf[1] == 0x01) {
         size_t idx = 20;
-        while (idx + 4 <= (size_t)len) {
+        while (idx + 4 <= static_cast<size_t>(len)) {
             uint16_t attr_type = (buf[idx] << 8) | buf[idx + 1];
             uint16_t attr_len = (buf[idx + 2] << 8) | buf[idx + 3];
             idx += 4;
 
-            if (attr_type == 0x0020 && attr_len >= 8 && idx + attr_len <= (size_t)len) {
+            if (attr_type == 0x0020 && attr_len >= 8 && idx + attr_len <= static_cast<size_t>(len)) {
                 uint8_t family = buf[idx + 1];
                 if (family == 0x01) {
                     uint16_t xor_port = (buf[idx + 2] << 8) | buf[idx + 3];
@@ -198,7 +210,11 @@ void P2PManager::start_client_proxy(uint16_t listen_port) {
         std::cout << "[P2P] Local TCP proxy listening on 127.0.0.1:" << listen_port << std::endl;
         while (proxy_running_) {
             struct sockaddr_in client_addr{};
+#ifdef _WIN32
+            int client_len = sizeof(client_addr);
+#else
             socklen_t client_len = sizeof(client_addr);
+#endif
             int client_sock = accept(proxy_listen_socket_, (struct sockaddr*)&client_addr, &client_len);
             if (client_sock < 0) {
                 if (!proxy_running_) break;
@@ -208,6 +224,11 @@ void P2PManager::start_client_proxy(uint16_t listen_port) {
             std::cout << "[P2P] Minecraft client connected to local proxy listener!" << std::endl;
             // In full P2P tunneling, this socket's read/write is piped to WebRTC datachannel.
             // For now, close or hold.
+#ifdef _WIN32
+            closesocket(client_sock);
+#else
+            close(client_sock);
+#endif
         }
     });
 }
