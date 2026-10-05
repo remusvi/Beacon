@@ -7,6 +7,7 @@ const isUpdating = ref(false);
 const errorMsg = ref('');
 const roomCode = ref('');
 const publicEndpoint = ref('');
+const localEndpoint = ref('');
 const targetPort = ref(25565);
 const activeConnections = ref([]);
 const copied = ref(false);
@@ -37,6 +38,7 @@ async function toggleHost() {
           isHosting.value = true;
           roomCode.value = res.room_code || '';
           publicEndpoint.value = res.public_endpoint || 'NAT Reflexive Discovery';
+          localEndpoint.value = res.local_endpoint || '';
         }
       } else {
         errorMsg.value = "Native P2P host bridge not available.";
@@ -48,6 +50,7 @@ async function toggleHost() {
       isHosting.value = false;
       roomCode.value = '';
       publicEndpoint.value = '';
+      localEndpoint.value = '';
       activeConnections.value = [];
     }
   } catch (err) {
@@ -67,6 +70,7 @@ async function fetchStatus() {
         isHosting.value = true;
         roomCode.value = status.room_code || '';
         publicEndpoint.value = status.public_endpoint || '';
+        localEndpoint.value = status.local_endpoint || '';
         activeConnections.value = status.active_connections || [];
       } else if (status.role !== 'host') {
         isHosting.value = false;
@@ -111,7 +115,7 @@ onUnmounted(() => {
 
       <div class="server-info">
         <h3>Direct P2P Multiplayer Host</h3>
-        <code>{{ isHosting ? publicEndpoint : 'NAT Reflexive Discovery' }}</code>
+        <code>{{ isHosting ? (publicEndpoint + (localEndpoint && localEndpoint !== publicEndpoint ? ' • LAN: ' + localEndpoint : '')) : 'NAT Reflexive Discovery' }}</code>
       </div>
 
       <div v-if="isHosting" class="lobby-code-section">
