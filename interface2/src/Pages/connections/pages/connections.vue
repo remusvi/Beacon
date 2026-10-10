@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue';
-import { Globe, Users, Copy, Check, Radio, Wifi, ShieldCheck, Loader2 } from 'lucide-vue-next';
+import { Globe, Users, Copy, Check, Radio, Wifi, ShieldCheck, Loader2, Server, AlertCircle } from 'lucide-vue-next';
 
 const isHosting = ref(false);
 const isUpdating = ref(false);
@@ -9,8 +9,12 @@ const roomCode = ref('');
 const publicEndpoint = ref('');
 const localEndpoint = ref('');
 const targetPort = ref(25565);
+const upnpActive = ref(false);
+const hasRunningServer = ref(false);
+const runningServerName = ref('');
 const activeConnections = ref([]);
 const copied = ref(false);
+const copiedEndpoint = ref(false);
 
 async function copyRoomCode() {
   if (!roomCode.value) return;
@@ -20,6 +24,42 @@ async function copyRoomCode() {
     setTimeout(() => { copied.value = false; }, 2000);
   } catch (err) {
     console.error('Failed to copy:', err);
+  }
+}
+
+async function copyDirectEndpoint() {
+  const ep = publicEndpoint.value || localEndpoint.value;
+  if (!ep) return;
+  try {
+    await navigator.clipboard.writeText(ep);
+    copiedEndpoint.value = true;
+    setTimeout(() => { copiedEndpoint.value = false; }, 2000);
+  } catch (err) {
+    console.error('Failed to copy endpoint:', err);
+  }
+}
+
+async function fetchServers() {
+  try {
+    if (window.getServers) {
+      const resStr = await window.getServers();
+      const servers = typeof resStr === 'string' ? JSON.parse(resStr) : resStr;
+      if (Array.isArray(servers)) {
+        const running = servers.find(s => s.status === 'RUNNING');
+        if (running) {
+          hasRunningServer.value = true;
+          runningServerName.value = running.name || running.id || 'Minecraft Server';
+          if (running.port) {
+            targetPort.value = Number(running.port);
+          }
+        } else {
+          hasRunningServer.value = false;
+          runningServerName.value = '';
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Could not query servers:', err);
   }
 }
 
@@ -39,6 +79,8 @@ async function toggleHost() {
           roomCode.value = res.room_code || '';
           publicEndpoint.value = res.public_endpoint || 'NAT Reflexive Discovery';
           localEndpoint.value = res.local_endpoint || '';
+          upnpActive.value = !!res.upnp_active;
+          if (res.target_port) targetPort.value = res.target_port;
         }
       } else {
         errorMsg.value = "Native P2P host bridge not available.";
@@ -51,6 +93,7 @@ async function toggleHost() {
       roomCode.value = '';
       publicEndpoint.value = '';
       localEndpoint.value = '';
+      upnpActive.value = false;
       activeConnections.value = [];
     }
   } catch (err) {
@@ -71,6 +114,8 @@ async function fetchStatus() {
         roomCode.value = status.room_code || '';
         publicEndpoint.value = status.public_endpoint || '';
         localEndpoint.value = status.local_endpoint || '';
+        upnpActive.value = !!status.upnp_active;
+        if (status.target_port) targetPort.value = status.target_port;
         activeConnections.value = status.active_connections || [];
       } else if (status.role !== 'host') {
         isHosting.value = false;
@@ -83,8 +128,12 @@ async function fetchStatus() {
 
 let pollTimer;
 onMounted(async () => {
+  await fetchServers();
   await fetchStatus();
-  pollTimer = setInterval(fetchStatus, 3000);
+  pollTimer = setInterval(async () => {
+    await fetchStatus();
+    await fetchServers();
+  }, 3000);
 });
 
 onUnmounted(() => {
@@ -108,6 +157,9 @@ onUnmounted(() => {
           <span>{{ isHosting ? 'Lobby Active' : 'Offline' }}</span>
         </div>
         <div class="badge-group">
+          <span v-if="isHosting" :class="['type-badge', upnpActive ? 'upnp-on' : 'upnp-off']">
+            {{ upnpActive ? 'UPNP FORWARDED' : 'LAN / DIRECT' }}
+          </span>
           <span class="type-badge">P2P MESH</span>
           <span class="version-badge">PORT {{ targetPort }}</span>
         </div>
@@ -118,6 +170,16 @@ onUnmounted(() => {
         <code>{{ isHosting ? (publicEndpoint + (localEndpoint && localEndpoint !== publicEndpoint ? ' • LAN: ' + localEndpoint : '')) : 'NAT Reflexive Discovery' }}</code>
       </div>
 
+      <!-- Server Running / Warning Status -->
+      <div v-if="hasRunningServer" class="server-status-banner running">
+        <Server :size="14" class="icon-server" />
+        <span>Connected to active server: <strong>{{ runningServerName }}</strong> (Port {{ targetPort }})</span>
+      </div>
+      <div v-else class="server-status-banner idle">
+        <AlertCircle :size="14" class="icon-warn" />
+        <span>No server is currently running. Start your server in the Servers tab so friends can join your world.</span>
+      </div>
+
       <div v-if="isHosting" class="lobby-code-section">
         <label class="section-label">LOBBY INVITE CODE</label>
         <div class="code-box">
@@ -125,10 +187,21 @@ onUnmounted(() => {
           <button class="btn-copy" @click="copyRoomCode">
             <Check v-if="copied" :size="14" class="icon-success" />
             <Copy v-else :size="14" />
-            {{ copied ? 'COPIED' : 'COPY' }}
+            {{ copied ? 'COPIED' : 'COPY CODE' }}
           </button>
         </div>
         <p class="code-hint">Share this code with friends to let them join from their Beacon app.</p>
+
+        <!-- Direct Connection Info for LAN/Direct IP -->
+        <div class="direct-endpoint-box">
+          <span class="direct-label">DIRECT HOST ENDPOINT:</span>
+          <code class="direct-val">{{ publicEndpoint || localEndpoint }}</code>
+          <button class="btn-copy-mini" @click="copyDirectEndpoint">
+            <Check v-if="copiedEndpoint" :size="12" class="icon-success" />
+            <Copy v-else :size="12" />
+            {{ copiedEndpoint ? 'COPIED' : 'COPY' }}
+          </button>
+        </div>
       </div>
 
       <div v-if="errorMsg" class="error-banner">
@@ -165,7 +238,7 @@ onUnmounted(() => {
             <Globe :size="16" class="peer-icon" />
             <span class="peer-id">{{ peer.id || 'Peer ' + (index + 1) }}</span>
           </div>
-          <span class="peer-endpoint">{{ peer.endpoint || 'Hole-punched' }}</span>
+          <span class="peer-endpoint">{{ peer.endpoint || 'Tunnel Established' }}</span>
           <span class="status-pill mini online">CONNECTED</span>
         </div>
       </div>
@@ -278,6 +351,18 @@ h1 {
   border-radius: 8px;
 }
 
+.type-badge.upnp-on {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.type-badge.upnp-off {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
 .server-info h3 {
   font-size: 1.35rem;
   font-weight: 800;
@@ -289,6 +374,39 @@ h1 {
   color: #0071e3;
   font-weight: 600;
   font-size: 0.85rem;
+}
+
+.server-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.server-status-banner.running {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: #86efac;
+}
+
+.server-status-banner.idle {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #fcd34d;
+}
+
+.icon-server {
+  color: #22c55e;
+  flex-shrink: 0;
+}
+
+.icon-warn {
+  color: #f59e0b;
+  flex-shrink: 0;
 }
 
 .lobby-code-section {
@@ -345,6 +463,48 @@ h1 {
   font-size: 0.8rem;
   color: #86868b;
   margin: 8px 0 0;
+}
+
+.direct-endpoint-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.direct-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #86868b;
+  letter-spacing: 0.5px;
+}
+
+.direct-val {
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: #93c5fd;
+  flex: 1;
+}
+
+.btn-copy-mini {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-copy-mini:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .card-actions {
