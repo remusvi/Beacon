@@ -82,6 +82,13 @@ private:
     std::string discover_public_endpoint(uint16_t local_port);
     std::string discover_local_ip();
 
+    // Outbound Public Reverse Tunnel (bore.pub)
+    bool start_public_tunnel(uint16_t local_target_port);
+    void stop_public_tunnel();
+    void tunnel_worker_loop(uint16_t local_target_port, std::string initial_buf);
+    void handle_tunnel_connection(const std::string& conn_uuid, uint16_t local_target_port);
+    static std::string resolve_host_to_ip(const std::string& host);
+
     // Client local TCP proxy listener
     void start_client_proxy(uint16_t listen_port, const std::string& primary_host_ip, const std::string& fallback_host_ip, uint16_t target_host_port);
     void stop_client_proxy();
@@ -97,6 +104,13 @@ private:
     std::mutex mutex_;
     SessionStatus status_;
     std::atomic<bool> is_running_{false};
+
+    // Tunnel state
+    std::atomic<bool> tunnel_running_{false};
+    int tunnel_control_socket_{-1};
+    uint16_t tunnel_remote_port_{0};
+    std::string tunnel_public_endpoint_;
+    std::unique_ptr<std::thread> tunnel_thread_;
 
     // Client Proxy state
     std::atomic<bool> proxy_running_{false};
