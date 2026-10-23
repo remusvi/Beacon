@@ -6,9 +6,12 @@
 #include <deque>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <mutex>
+#include <chrono>
 
 namespace fs = std::filesystem;
 namespace jlib = nlohmann;
@@ -35,6 +38,51 @@ static inline bool is_valid_mc_name(const std::string& name) {
         }
     }
     return true;
+}
+
+static inline void remove_online_player(std::set<std::string>& online_players, const std::string& target) {
+    std::string clean = trim(target);
+    while (!clean.empty() && (clean.back() == ']' || clean.back() == ':' || clean.back() == ')' || clean.back() == '.' || clean.back() == ',')) {
+        clean.pop_back();
+    }
+    while (!clean.empty() && (clean.front() == '[' || clean.front() == '(')) {
+        clean.erase(clean.begin());
+    }
+    clean = trim(clean);
+    if (clean.empty()) return;
+
+    std::string lower_clean = to_lower(clean);
+    for (auto it = online_players.begin(); it != online_players.end(); ) {
+        if (to_lower(*it) == lower_clean) {
+            it = online_players.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+struct EvictionRecord {
+    std::string player_name_lower;
+    std::chrono::steady_clock::time_point timestamp;
+    bool is_ban;
+};
+
+static std::unordered_map<std::string, std::vector<EvictionRecord>> s_evicted_players;
+static std::mutex s_evicted_mutex;
+
+static void record_eviction(const std::string& server_id, const std::string& player_name, bool is_ban) {
+    std::string lower_name = to_lower(trim(player_name));
+    if (lower_name.empty()) return;
+    std::lock_guard<std::mutex> lock(s_evicted_mutex);
+    auto& list = s_evicted_players[server_id];
+    for (auto& ev : list) {
+        if (ev.player_name_lower == lower_name) {
+            ev.timestamp = std::chrono::steady_clock::now();
+            ev.is_ban = ev.is_ban || is_ban;
+            return;
+        }
+    }
+    list.push_back({lower_name, std::chrono::steady_clock::now(), is_ban});
 }
 
 jlib::json get_server_players(const std::string& server_id) {
@@ -91,7 +139,28 @@ jlib::json get_server_players(const std::string& server_id) {
         } catch (...) {}
     }
 
-    // 3. Parse latest.log to track active players
+    // 3. Read banned-players.json
+    std::unordered_set<std::string> banned_names;
+    fs::path banned_path = server_dir / "banned-players.json";
+    if (fs::exists(banned_path)) {
+        try {
+            std::ifstream b_file(banned_path);
+            if (b_file.is_open()) {
+                jlib::json b_data;
+                b_file >> b_data;
+                if (b_data.is_array()) {
+                    for (const auto& item : b_data) {
+                        std::string b_name = item.value("name", "");
+                        if (!b_name.empty()) {
+                            banned_names.insert(to_lower(trim(b_name)));
+                        }
+                    }
+                }
+            }
+        } catch (...) {}
+    }
+
+    // 4. Parse latest.log to track active players
     std::set<std::string> online_players;
     fs::path log_path = server_dir / "logs" / "latest.log";
 
@@ -114,7 +183,9 @@ jlib::json get_server_players(const std::string& server_id) {
                     if (colon_pos != std::string::npos) {
                         std::string name = trim(line.substr(colon_pos + 2, join_pos - (colon_pos + 2)));
                         if (is_valid_mc_name(name)) {
-                            online_players.insert(name);
+                            if (banned_names.find(to_lower(name)) == banned_names.end()) {
+                                online_players.insert(name);
+                            }
                         }
                     }
                     continue;
@@ -126,9 +197,7 @@ jlib::json get_server_players(const std::string& server_id) {
                     size_t colon_pos = line.rfind(": ", leave_pos);
                     if (colon_pos != std::string::npos) {
                         std::string name = trim(line.substr(colon_pos + 2, leave_pos - (colon_pos + 2)));
-                        if (!name.empty()) {
-                            online_players.erase(name);
-                        }
+                        remove_online_player(online_players, name);
                     }
                     continue;
                 }
@@ -139,43 +208,103 @@ jlib::json get_server_players(const std::string& server_id) {
                     size_t colon_pos = line.rfind(": ", lost_pos);
                     if (colon_pos != std::string::npos) {
                         std::string name = trim(line.substr(colon_pos + 2, lost_pos - (colon_pos + 2)));
-                        if (!name.empty()) {
-                            online_players.erase(name);
-                        }
+                        remove_online_player(online_players, name);
                     }
                     continue;
                 }
 
-                // Check for Kicked
-                size_t kicked_pos = line.find(" Kicked ");
+                std::string lower_line = to_lower(line);
+
+                // Check for " was kicked "
+                size_t was_kicked_pos = lower_line.find(" was kicked ");
+                if (was_kicked_pos != std::string::npos) {
+                    size_t colon_pos = line.rfind(": ", was_kicked_pos);
+                    if (colon_pos != std::string::npos) {
+                        std::string name = trim(line.substr(colon_pos + 2, was_kicked_pos - (colon_pos + 2)));
+                        remove_online_player(online_players, name);
+                    }
+                    continue;
+                }
+
+                // Check for "kicked "
+                size_t kicked_pos = lower_line.find("kicked ");
                 if (kicked_pos != std::string::npos) {
-                    size_t colon_pos = line.find(":", kicked_pos + 8);
-                    std::string name;
-                    if (colon_pos != std::string::npos) {
-                        name = trim(line.substr(kicked_pos + 8, colon_pos - (kicked_pos + 8)));
-                    } else {
-                        name = trim(line.substr(kicked_pos + 8));
+                    size_t name_start = kicked_pos + 7;
+                    if (lower_line.substr(name_start, 7) == "player ") {
+                        name_start += 7;
                     }
-                    if (!name.empty()) {
-                        online_players.erase(name);
+                    size_t delim_pos = line.find_first_of(": ]", name_start);
+                    std::string name = (delim_pos != std::string::npos)
+                        ? line.substr(name_start, delim_pos - name_start)
+                        : line.substr(name_start);
+                    remove_online_player(online_players, name);
+                    continue;
+                }
+
+                // Check for " was banned "
+                size_t was_banned_pos = lower_line.find(" was banned ");
+                if (was_banned_pos != std::string::npos) {
+                    size_t colon_pos = line.rfind(": ", was_banned_pos);
+                    if (colon_pos != std::string::npos) {
+                        std::string name = trim(line.substr(colon_pos + 2, was_banned_pos - (colon_pos + 2)));
+                        remove_online_player(online_players, name);
                     }
                     continue;
                 }
 
-                // Check for Disconnecting
-                size_t disc_pos = line.find(" Disconnecting ");
-                if (disc_pos != std::string::npos) {
-                    size_t colon_pos = line.find(":", disc_pos + 15);
-                    std::string name;
-                    if (colon_pos != std::string::npos) {
-                        name = trim(line.substr(disc_pos + 15, colon_pos - (disc_pos + 15)));
-                    } else {
-                        name = trim(line.substr(disc_pos + 15));
+                // Check for "banned "
+                size_t banned_pos = lower_line.find("banned ");
+                if (banned_pos != std::string::npos) {
+                    size_t name_start = banned_pos + 7;
+                    if (lower_line.substr(name_start, 7) == "player ") {
+                        name_start += 7;
                     }
-                    if (!name.empty()) {
-                        online_players.erase(name);
+                    size_t delim_pos = line.find_first_of(": ]", name_start);
+                    std::string name = (delim_pos != std::string::npos)
+                        ? line.substr(name_start, delim_pos - name_start)
+                        : line.substr(name_start);
+                    remove_online_player(online_players, name);
+                    continue;
+                }
+
+                // Check for "disconnecting "
+                if (lower_line.find("disconnecting ") != std::string::npos) {
+                    size_t np = lower_line.find("name=");
+                    if (np != std::string::npos) {
+                        size_t end_p = line.find_first_of(",])", np + 5);
+                        std::string name = (end_p != std::string::npos)
+                            ? line.substr(np + 5, end_p - (np + 5))
+                            : line.substr(np + 5);
+                        remove_online_player(online_players, name);
+                    } else {
+                        size_t disc_idx = lower_line.find("disconnecting ");
+                        size_t start_n = disc_idx + 14;
+                        size_t colon_p = line.find(":", start_n);
+                        std::string name = (colon_p != std::string::npos)
+                            ? line.substr(start_n, colon_p - start_n)
+                            : line.substr(start_n);
+                        remove_online_player(online_players, name);
                     }
                     continue;
+                }
+            }
+        }
+    }
+
+    // Exclude any player found in banned-players.json
+    for (const auto& bname : banned_names) {
+        remove_online_player(online_players, bname);
+    }
+
+    // Exclude any player currently evicted (kicked within 20s or banned)
+    {
+        std::lock_guard<std::mutex> lock(s_evicted_mutex);
+        auto it = s_evicted_players.find(server_id);
+        if (it != s_evicted_players.end()) {
+            auto now = std::chrono::steady_clock::now();
+            for (const auto& ev : it->second) {
+                if (ev.is_ban || std::chrono::duration_cast<std::chrono::seconds>(now - ev.timestamp).count() < 20) {
+                    remove_online_player(online_players, ev.player_name_lower);
                 }
             }
         }
@@ -212,31 +341,59 @@ jlib::json get_server_players(const std::string& server_id) {
 }
 
 bool op_player(const std::string& server_id, const std::string& player_name) {
-    if (player_name.empty()) return false;
-    return send_server_command(server_id, "op " + player_name);
+    std::string clean_name = trim(player_name);
+    if (clean_name.empty()) return false;
+    return send_server_command(server_id, "op " + clean_name);
 }
 
 bool deop_player(const std::string& server_id, const std::string& player_name) {
-    if (player_name.empty()) return false;
-    return send_server_command(server_id, "deop " + player_name);
+    std::string clean_name = trim(player_name);
+    if (clean_name.empty()) return false;
+    return send_server_command(server_id, "deop " + clean_name);
 }
 
 bool kick_player(const std::string& server_id, const std::string& player_name, const std::string& reason) {
-    if (player_name.empty()) return false;
-    std::string cmd = "kick " + player_name;
-    if (!reason.empty()) {
-        cmd += " " + reason;
+    std::string clean_name = trim(player_name);
+    if (clean_name.empty()) return false;
+
+    std::string clean_reason = reason;
+    for (char& c : clean_reason) {
+        if (c == '\r' || c == '\n') c = ' ';
     }
-    return send_server_command(server_id, cmd);
+    clean_reason = trim(clean_reason);
+
+    std::string cmd = "kick " + clean_name;
+    if (!clean_reason.empty()) {
+        cmd += " " + clean_reason;
+    }
+
+    bool ok = send_server_command(server_id, cmd);
+    if (ok) {
+        record_eviction(server_id, clean_name, false);
+    }
+    return ok;
 }
 
 bool ban_player(const std::string& server_id, const std::string& player_name, const std::string& reason) {
-    if (player_name.empty()) return false;
-    std::string cmd = "ban " + player_name;
-    if (!reason.empty()) {
-        cmd += " " + reason;
+    std::string clean_name = trim(player_name);
+    if (clean_name.empty()) return false;
+
+    std::string clean_reason = reason;
+    for (char& c : clean_reason) {
+        if (c == '\r' || c == '\n') c = ' ';
     }
-    return send_server_command(server_id, cmd);
+    clean_reason = trim(clean_reason);
+
+    std::string cmd = "ban " + clean_name;
+    if (!clean_reason.empty()) {
+        cmd += " " + clean_reason;
+    }
+
+    bool ok = send_server_command(server_id, cmd);
+    if (ok) {
+        record_eviction(server_id, clean_name, true);
+    }
+    return ok;
 }
 
 jlib::json get_server_logs(const std::string& server_id, int max_lines) {
