@@ -81,6 +81,9 @@ target_link_libraries(Beacon2_0 PRIVATE
 if(TARGET Boost::process)
     target_link_libraries(Beacon2_0 PRIVATE Boost::process)
 endif()
+if(WIN32)
+    target_link_libraries(Beacon2_0 PRIVATE ws2_32)
+endif()
 
 # Asset Compilation Step
 set(GENERATED_UI_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/interface2/dist/index_html.h")
