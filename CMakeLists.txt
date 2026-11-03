@@ -27,8 +27,8 @@ set(CMAKE_USE_LIBIDN2 OFF CACHE BOOL "Disable IDN2 support for curl" FORCE)
 
 include(FetchContent)
 
-# 1. Ask for the process component specifically
-find_package(Boost REQUIRED COMPONENTS process)
+# Boost process v1 depends on Boost::filesystem
+find_package(Boost REQUIRED COMPONENTS filesystem)
 
 FetchContent_Declare(
         webview
@@ -76,8 +76,11 @@ target_link_libraries(Beacon2_0 PRIVATE
     nlohmann_json::nlohmann_json
     cpr::cpr
     Boost::headers
-    Boost::process
+    Boost::filesystem
 )
+if(TARGET Boost::process)
+    target_link_libraries(Beacon2_0 PRIVATE Boost::process)
+endif()
 
 # Asset Compilation Step
 set(GENERATED_UI_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/interface2/dist/index_html.h")
