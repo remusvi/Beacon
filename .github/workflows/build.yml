@@ -66,10 +66,14 @@ jobs:
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
+      - name: Setup MSVC Environment
+        if: matrix.target == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure CMake (Windows)
         if: matrix.target == 'windows'
         run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DBoost_ROOT="${{ steps.install-boost.outputs.BOOST_ROOT }}"
+          cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBoost_ROOT="${{ steps.install-boost.outputs.BOOST_ROOT }}"
         env:
           BOOST_ROOT: ${{ steps.install-boost.outputs.BOOST_ROOT }}
 
