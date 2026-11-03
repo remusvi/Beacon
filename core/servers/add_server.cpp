@@ -5,55 +5,53 @@
 #include <cstdint>
 #include <iostream>
 #include <ostream>
-#include "serverEntity.h"
-#include "../utils/utils.h"
-#include "../containers/container.h"
-#include "nlohmann/json.hpp"
 #include <fstream>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <algorithm>
+#include "serverEntity.h"
+#include "servers.h"
+#include "../utils/utils.h"
+#include "../containers/container.h"
+#include "nlohmann/json.hpp"
 
 namespace fs = std::filesystem;
 namespace jlib = nlohmann;
-
 
 std::string db_init() {
     std::string resource_dir = get_resource_path();
     fs::path resource_path(resource_dir);
 
-    //define db file
+    if (!fs::exists(resource_path)) {
+        fs::create_directories(resource_path);
+    }
+
     fs::path db_path = resource_path / "db.json";
 
     if (!fs::exists(db_path)) {
-        //open a stream
         std::ofstream dbstream(db_path);
-        dbstream.close();
-        std::cout << "creating db file" << std::endl;
+        if (dbstream.is_open()) {
+            dbstream << "[]";
+            dbstream.close();
+            std::cout << "created db file: " << db_path.string() << std::endl;
+        }
     }
 
     return db_path.string();
-
-};
-
+}
 
 void add_server(
-std::string& id,
-std::string& name,
-Provider provider,
-std::string& version,
-std::int32_t ram,
-std::int32_t port,
-bool online_mode
+    const std::string& id,
+    const std::string& name,
+    Provider provider,
+    const std::string& version,
+    std::int32_t ram,
+    std::int32_t port,
+    bool online_mode
 ) {
-
-    //get the jar path
-        // download the jar if it doesnt exist or use it from cache if it does
-    // create a container (folder server instance)
-    //add server to json db
     std::string resource_dir = get_resource_path();
     std::string jar_path = ensure_jar_exists(resource_dir, version, provider);
-
-
 
     Container container {
         id,
@@ -61,58 +59,51 @@ bool online_mode
         port,
     };
 
-    std::string jar_link = create_container(container,
-        online_mode, jar_path);
-
+    std::string jar_link = create_container(container, online_mode, jar_path);
 
     serverEntity server {
         id,
         name,
         jar_link,
         version,
-        "offline",
+        "OFFLINE",
         provider,
         std::nullopt,
-        online_mode,
+        port,
         ram,
+        online_mode
     };
 
-
-
-    //if stream to first pull data from json
     std::string db_path = db_init();
     std::ifstream reader(db_path);
     std::vector<serverEntity> server_list;
 
-    if (reader.is_open()){
-        
-      try{
-        jlib::json dump;
-        reader >> dump;
-        
-        
-
-        if (dump.is_array()) {
-          server_list = dump.get<std::vector<serverEntity>>();
+    if (reader.is_open()) {
+        try {
+            jlib::json dump;
+            reader >> dump;
+            if (dump.is_array()) {
+                server_list = dump.get<std::vector<serverEntity>>();
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Warning reading DB: " << e.what() << std::endl;
         }
-      }catch (const std::exception& e){
         reader.close();
-      }
     }
+
+    // Replace if id already exists
+    server_list.erase(
+        std::remove_if(server_list.begin(), server_list.end(),
+            [&](const serverEntity& s) { return s.id == id; }),
+        server_list.end()
+    );
 
     server_list.push_back(server);
 
-
-    // //call db init
-   // std::string db_path = db_init();
     std::ofstream dbstream(db_path);
-
-    // //turn struct into var json type
-    jlib::json t = server_list;
-
     if (dbstream.is_open()) {
-         //write to json
-         dbstream << t.dump(4);
-         dbstream.close();
-     }
+        jlib::json t = server_list;
+        dbstream << t.dump(4);
+        dbstream.close();
+    }
 }

@@ -9,7 +9,7 @@ import { connectionsRoutes } from "@/Pages/connections/connections";
 // import { authRoutes } from "../Pages/auth";
 // @ts-ignore
 import { dashboardRoutes } from "@/Pages/dashboard/dashboard";
-//import {connectRoutes} from '@/Pages/connect/connect.ts'
+import { connectRoutes } from '@/Pages/connect/connect';
 
 const router = createRouter({
   // Electron usually fails on refresh with WebHistory; HashHistory is safer
@@ -21,7 +21,7 @@ const router = createRouter({
       children: [
         ...connectionsRoutes,
         ...dashboardRoutes,
-        //...connectRoutes
+        ...connectRoutes
       ]
     },
     // {

@@ -4,6 +4,7 @@
 
 #include <ostream>
 #include "serverEntity.h"
+#include "servers.h"
 #include "../utils/utils.h"
 #include "../containers/container.h"
 #include "nlohmann/json.hpp"
@@ -14,61 +15,52 @@ namespace fs = std::filesystem;
 namespace jlib = nlohmann;
 
 jlib::json get_servers() {
-    //get servers
-    // std::string db_path_string = get_resource_path();
-    // fs::path db_path(db_path_string);
-    // db_path /= "db.json";
-
     fs::path db_path(get_resource_path());
     db_path /= "db.json";
 
-
-
     if (!fs::exists(db_path)) {
-        //create path
         fs::create_directories(db_path.parent_path());
-        //create path file
         std::ofstream db(db_path, std::ios::binary);
         if (!db.is_open()) {
             std::cerr << "Failed to create DB file " << db_path.string() << std::endl;
+        } else {
+            db << "[]";
+            db.close();
         }
-
-        db << "[]";
-        db.close();
     }
 
     std::ifstream filestream(db_path);
-
     std::vector<serverEntity> servers;
-    std::string line;
 
     if (filestream.is_open()) {
         try {
             jlib::json j;
-
-            // Read directly from the file stream into the JSON object
             filestream >> j;
-
-            line = j.dump();
-
             if (j.is_array()) {
                 servers = j.get<std::vector<serverEntity>>();
-                std::cout << "Loaded servers: " << servers.size() << std::endl;
             }
-        }
-        catch (const std::exception& e) {
-            std::cerr << "JSON Error: " << e.what() << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "JSON Error in get_servers: " << e.what() << std::endl;
         }
         filestream.close();
     }
 
+    // Sync live process status & paths
+    std::string resource_path = get_resource_path();
+    for (auto& server : servers) {
+        if (is_server_running(server.id)) {
+            server.status = "RUNNING";
+        } else {
+            server.status = "OFFLINE";
+        }
 
-    //convert vec of server entities to json
+        // Normalize instance_path to current environment if needed
+        fs::path local_jar = fs::path(resource_path) / "servers" / server.id / "server.jar";
+        if (fs::exists(local_jar)) {
+            server.instance_path = local_jar.string();
+        }
+    }
+
     jlib::json server_json = servers;
-
-    // std::cout << server_json.dump() << std::endl;
-    // std::cout << line << std::endl;
-
     return server_json;
-
 }

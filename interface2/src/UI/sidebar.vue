@@ -2,7 +2,7 @@
   <aside class="sidebar">
     <nav class="nav">
       <router-link v-for="item in menu" :key="item.name" :to="item.path" class="nav-item">
-        <span class="nav-icon">{{ item.icon }}</span>
+        <component :is="item.icon" class="nav-icon" :size="20" />
         <span class="nav-label">{{ item.name }}</span>
       </router-link>
     </nav>
@@ -10,12 +10,14 @@
 </template>
 
 <script setup>
+import { Server, Globe, Laptop } from 'lucide-vue-next';
+
 const menu = [
-  { name: 'Server', path: '/', icon: '☰' },
-  // { name: 'Options', path: '/settings', icon: '⚙' },
-  { name: 'Connections', path: '/connections', icon: '🌐' },
-  { name: 'Connect', path: '/connect', icon: '💻' },
-  //{ name: 'Backend', path: '/backend', icon: '📁' }
+  { name: 'Server', path: '/', icon: Server },
+  // { name: 'Options', path: '/settings', icon: Settings },
+  { name: 'Connections', path: '/connections', icon: Globe },
+  { name: 'Connect', path: '/connect', icon: Laptop },
+  // { name: 'Backend', path: '/backend', icon: Folder }
 ]
 </script>
 
