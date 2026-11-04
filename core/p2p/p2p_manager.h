@@ -43,6 +43,7 @@ struct SessionStatus {
     std::string public_endpoint;
     std::string local_endpoint;
     std::string error_message;
+    bool upnp_active = false;
     std::vector<PeerInfo> connected_peers;
 };
 
@@ -74,8 +75,9 @@ private:
     std::string discover_local_ip();
 
     // Client local TCP proxy listener
-    void start_client_proxy(uint16_t listen_port, const std::string& target_host_ip, uint16_t target_host_port);
+    void start_client_proxy(uint16_t listen_port, const std::string& primary_host_ip, const std::string& fallback_host_ip, uint16_t target_host_port);
     void stop_client_proxy();
+    int connect_with_timeout(const std::string& ip, uint16_t port, int timeout_ms = 2500);
 
     // Background signaling workers
     void start_host_signaling();
@@ -92,7 +94,8 @@ private:
     std::atomic<bool> proxy_running_{false};
     int proxy_listen_socket_{-1};
     std::unique_ptr<std::thread> client_listener_thread_;
-    std::string client_target_host_ip_;
+    std::string client_primary_host_ip_;
+    std::string client_fallback_host_ip_;
     uint16_t client_target_host_port_{25565};
 
     // Host signaling state

@@ -16,6 +16,7 @@
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <netdb.h>
@@ -176,6 +177,92 @@ std::string P2PManager::discover_public_endpoint(uint16_t local_port) {
     return mapped_endpoint;
 }
 
+int P2PManager::connect_with_timeout(const std::string& ip, uint16_t port, int timeout_ms) {
+    if (ip.empty() || ip == "0.0.0.0") return -1;
+
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return -1;
+
+    // Set non-blocking
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(sock, FIONBIO, &mode);
+#else
+    int flags = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+#endif
+
+    struct sockaddr_in raddr{};
+    raddr.sin_family = AF_INET;
+    raddr.sin_port = htons(port);
+    raddr.sin_addr.s_addr = inet_addr(ip.c_str());
+
+    int res = connect(sock, (struct sockaddr*)&raddr, sizeof(raddr));
+    if (res < 0) {
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        if (err != WSAEWOULDBLOCK && err != WSAEINPROGRESS) {
+            closesocket(sock);
+            return -1;
+        }
+#else
+        if (errno != EINPROGRESS) {
+            close(sock);
+            return -1;
+        }
+#endif
+        fd_set write_fds, err_fds;
+        FD_ZERO(&write_fds);
+        FD_ZERO(&err_fds);
+        FD_SET(sock, &write_fds);
+        FD_SET(sock, &err_fds);
+
+        struct timeval tv;
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+        int sel = select(sock + 1, nullptr, &write_fds, &err_fds, &tv);
+        if (sel <= 0) {
+#ifdef _WIN32
+            closesocket(sock);
+#else
+            close(sock);
+#endif
+            return -1;
+        }
+
+        int so_error = 0;
+#ifdef _WIN32
+        int optlen = sizeof(so_error);
+#else
+        socklen_t optlen = sizeof(so_error);
+#endif
+        getsockopt(sock, SOL_SOCKET, SO_ERROR, (char*)&so_error, &optlen);
+        if (so_error != 0) {
+#ifdef _WIN32
+            closesocket(sock);
+#else
+            close(sock);
+#endif
+            return -1;
+        }
+    }
+
+    // Restore blocking mode
+#ifdef _WIN32
+    mode = 0;
+    ioctlsocket(sock, FIONBIO, &mode);
+    int nodelay = 1;
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
+#else
+    fcntl(sock, F_SETFL, flags);
+    int nodelay = 1;
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+#endif
+
+    return sock;
+}
+
 bool P2PManager::try_upnp_port_forward(uint16_t port) {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) return false;
@@ -184,10 +271,10 @@ bool P2PManager::try_upnp_port_forward(uint16_t port) {
     setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (const char*)&broadcast, sizeof(broadcast));
 
 #ifdef _WIN32
-    DWORD tv = 1500;
+    DWORD tv = 1200;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
 #else
-    struct timeval tv{1, 500000};
+    struct timeval tv{1, 200000};
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
 
@@ -196,23 +283,120 @@ bool P2PManager::try_upnp_port_forward(uint16_t port) {
     dest.sin_port = htons(1900);
     dest.sin_addr.s_addr = inet_addr("239.255.255.250");
 
-    std::string msg = 
+    std::string msg1 = 
         "M-SEARCH * HTTP/1.1\r\n"
         "HOST: 239.255.255.250:1900\r\n"
         "MAN: \"ssdp:discover\"\r\n"
         "MX: 2\r\n"
         "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n";
 
-    sendto(sock, msg.c_str(), msg.size(), 0, (struct sockaddr*)&dest, sizeof(dest));
+    std::string msg2 = 
+        "M-SEARCH * HTTP/1.1\r\n"
+        "HOST: 239.255.255.250:1900\r\n"
+        "MAN: \"ssdp:discover\"\r\n"
+        "MX: 2\r\n"
+        "ST: urn:schemas-upnp-org:service:WANIPConnection:1\r\n\r\n";
 
-    char buf[2048] = {0};
-    struct sockaddr_in from{};
+    sendto(sock, msg1.c_str(), msg1.size(), 0, (struct sockaddr*)&dest, sizeof(dest));
+    sendto(sock, msg2.c_str(), msg2.size(), 0, (struct sockaddr*)&dest, sizeof(dest));
+
+    bool mapped = false;
+
+    // Loop through incoming SSDP responses to find the real Internet Gateway Device
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        char buf[2048] = {0};
+        struct sockaddr_in from{};
 #ifdef _WIN32
-    int from_len = sizeof(from);
+        int from_len = sizeof(from);
 #else
-    socklen_t from_len = sizeof(from);
+        socklen_t from_len = sizeof(from);
 #endif
-    auto n = recvfrom(sock, buf, sizeof(buf) - 1, 0, (struct sockaddr*)&from, &from_len);
+        auto n = recvfrom(sock, buf, sizeof(buf) - 1, 0, (struct sockaddr*)&from, &from_len);
+        if (n <= 0) break;
+
+        std::string resp(buf, n);
+        auto loc_pos = resp.find("LOCATION:");
+        if (loc_pos == std::string::npos) {
+            loc_pos = resp.find("Location:");
+        }
+        if (loc_pos == std::string::npos) continue;
+
+        auto line_end = resp.find("\r\n", loc_pos);
+        if (line_end == std::string::npos) line_end = resp.find("\n", loc_pos);
+        std::string location_url = resp.substr(loc_pos + 9, line_end - (loc_pos + 9));
+        location_url.erase(0, location_url.find_first_not_of(" \t"));
+        location_url.erase(location_url.find_last_not_of(" \t\r\n") + 1);
+
+        if (location_url.empty()) continue;
+
+        // Fetch device description XML
+        auto desc_res = cpr::Get(cpr::Url{location_url}, cpr::Timeout{2500});
+        if (desc_res.status_code != 200 || desc_res.text.empty()) continue;
+
+        std::string service_type = "urn:schemas-upnp-org:service:WANIPConnection:1";
+        auto s_pos = desc_res.text.find(service_type);
+        if (s_pos == std::string::npos) {
+            service_type = "urn:schemas-upnp-org:service:WANPPPConnection:1";
+            s_pos = desc_res.text.find(service_type);
+        }
+        if (s_pos == std::string::npos) continue;
+
+        auto ctrl_pos = desc_res.text.find("<controlURL>", s_pos);
+        if (ctrl_pos == std::string::npos) continue;
+        auto ctrl_end = desc_res.text.find("</controlURL>", ctrl_pos);
+        if (ctrl_end == std::string::npos) continue;
+
+        std::string rel_ctrl = desc_res.text.substr(ctrl_pos + 12, ctrl_end - (ctrl_pos + 12));
+        rel_ctrl.erase(0, rel_ctrl.find_first_not_of(" \t\r\n"));
+        rel_ctrl.erase(rel_ctrl.find_last_not_of(" \t\r\n") + 1);
+
+        std::string control_url;
+        if (rel_ctrl.rfind("http", 0) == 0) {
+            control_url = rel_ctrl;
+        } else {
+            auto slash_idx = location_url.find('/', 7);
+            std::string base = (slash_idx != std::string::npos) ? location_url.substr(0, slash_idx) : location_url;
+            control_url = base + (rel_ctrl[0] == '/' ? "" : "/") + rel_ctrl;
+        }
+
+        upnp_control_url_ = control_url;
+        upnp_service_type_ = service_type;
+
+        // Send SOAP AddPortMapping
+        std::string local_ip = discover_local_ip();
+        std::string soap_body =
+            "<?xml version=\"1.0\"?>\r\n"
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+            "<s:Body>\r\n"
+            "<u:AddPortMapping xmlns:u=\"" + service_type + "\">\r\n"
+            "<NewRemoteHost></NewRemoteHost>\r\n"
+            "<NewExternalPort>" + std::to_string(port) + "</NewExternalPort>\r\n"
+            "<NewProtocol>TCP</NewProtocol>\r\n"
+            "<NewInternalPort>" + std::to_string(port) + "</NewInternalPort>\r\n"
+            "<NewInternalClient>" + local_ip + "</NewInternalClient>\r\n"
+            "<NewEnabled>1</NewEnabled>\r\n"
+            "<NewPortMappingDescription>Beacon P2P Multiplayer</NewPortMappingDescription>\r\n"
+            "<NewLeaseDuration>0</NewLeaseDuration>\r\n"
+            "</u:AddPortMapping>\r\n"
+            "</s:Body>\r\n"
+            "</s:Envelope>\r\n";
+
+        auto soap_res = cpr::Post(
+            cpr::Url{control_url},
+            cpr::Header{
+                {"Content-Type", "text/xml; charset=\"utf-8\""},
+                {"SOAPAction", "\"" + service_type + "#AddPortMapping\""}
+            },
+            cpr::Body{soap_body},
+            cpr::Timeout{3000}
+        );
+
+        if (soap_res.status_code == 200) {
+            std::cout << "[P2P] UPnP AddPortMapping succeeded for port " << port << " on " << control_url << std::endl;
+            mapped = true;
+            break;
+        }
+    }
 
 #ifdef _WIN32
     closesocket(sock);
@@ -220,88 +404,7 @@ bool P2PManager::try_upnp_port_forward(uint16_t port) {
     close(sock);
 #endif
 
-    if (n <= 0) return false;
-
-    std::string resp(buf, n);
-    auto loc_pos = resp.find("LOCATION:");
-    if (loc_pos == std::string::npos) {
-        loc_pos = resp.find("Location:");
-    }
-    if (loc_pos == std::string::npos) return false;
-
-    auto line_end = resp.find("\r\n", loc_pos);
-    if (line_end == std::string::npos) line_end = resp.find("\n", loc_pos);
-    std::string location_url = resp.substr(loc_pos + 9, line_end - (loc_pos + 9));
-    location_url.erase(0, location_url.find_first_not_of(" \t"));
-    location_url.erase(location_url.find_last_not_of(" \t\r\n") + 1);
-
-    if (location_url.empty()) return false;
-
-    // Fetch device description XML
-    auto desc_res = cpr::Get(cpr::Url{location_url}, cpr::Timeout{3000});
-    if (desc_res.status_code != 200 || desc_res.text.empty()) return false;
-
-    std::string service_type = "urn:schemas-upnp-org:service:WANIPConnection:1";
-    auto s_pos = desc_res.text.find(service_type);
-    if (s_pos == std::string::npos) {
-        service_type = "urn:schemas-upnp-org:service:WANPPPConnection:1";
-        s_pos = desc_res.text.find(service_type);
-    }
-    if (s_pos == std::string::npos) return false;
-
-    auto ctrl_pos = desc_res.text.find("<controlURL>", s_pos);
-    if (ctrl_pos == std::string::npos) return false;
-    auto ctrl_end = desc_res.text.find("</controlURL>", ctrl_pos);
-    if (ctrl_end == std::string::npos) return false;
-
-    std::string rel_ctrl = desc_res.text.substr(ctrl_pos + 12, ctrl_end - (ctrl_pos + 12));
-    rel_ctrl.erase(0, rel_ctrl.find_first_not_of(" \t\r\n"));
-    rel_ctrl.erase(rel_ctrl.find_last_not_of(" \t\r\n") + 1);
-
-    std::string control_url;
-    if (rel_ctrl.rfind("http", 0) == 0) {
-        control_url = rel_ctrl;
-    } else {
-        auto slash_idx = location_url.find('/', 7);
-        std::string base = (slash_idx != std::string::npos) ? location_url.substr(0, slash_idx) : location_url;
-        control_url = base + (rel_ctrl[0] == '/' ? "" : "/") + rel_ctrl;
-    }
-
-    upnp_control_url_ = control_url;
-    upnp_service_type_ = service_type;
-
-    // Send SOAP AddPortMapping
-    std::string local_ip = discover_local_ip();
-    std::string soap_body =
-        "<?xml version=\"1.0\"?>\r\n"
-        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
-        "<s:Body>\r\n"
-        "<u:AddPortMapping xmlns:u=\"" + service_type + "\">\r\n"
-        "<NewRemoteHost></NewRemoteHost>\r\n"
-        "<NewExternalPort>" + std::to_string(port) + "</NewExternalPort>\r\n"
-        "<NewProtocol>TCP</NewProtocol>\r\n"
-        "<NewInternalPort>" + std::to_string(port) + "</NewInternalPort>\r\n"
-        "<NewInternalClient>" + local_ip + "</NewInternalClient>\r\n"
-        "<NewEnabled>1</NewEnabled>\r\n"
-        "<NewPortMappingDescription>Beacon P2P Multiplayer</NewPortMappingDescription>\r\n"
-        "<NewLeaseDuration>0</NewLeaseDuration>\r\n"
-        "</u:AddPortMapping>\r\n"
-        "</s:Body>\r\n"
-        "</s:Envelope>\r\n";
-
-    auto soap_res = cpr::Post(
-        cpr::Url{control_url},
-        cpr::Header{
-            {"Content-Type", "text/xml; charset=\"utf-8\""},
-            {"SOAPAction", "\"" + service_type + "#AddPortMapping\""}
-        },
-        cpr::Body{soap_body},
-        cpr::Timeout{3000}
-    );
-
-    bool ok = (soap_res.status_code == 200);
-    std::cout << "[P2P] UPnP AddPortMapping status: " << soap_res.status_code << (ok ? " (Success)" : " (Ignored)") << std::endl;
-    return ok;
+    return mapped;
 }
 
 bool P2PManager::delete_upnp_port_forward(uint16_t port) {
@@ -380,6 +483,7 @@ void P2PManager::start_host_signaling() {
 
                 cpr::Post(
                     cpr::Url{"https://ntfy.sh/beacon_p2p_room_" + room_code},
+                    cpr::Header{{"Content-Type", "text/plain; charset=utf-8"}},
                     cpr::Body{room_announcement.dump()},
                     cpr::Timeout{2000}
                 );
@@ -399,36 +503,56 @@ void P2PManager::start_host_signaling() {
                         if (line.empty()) continue;
                         try {
                             auto j = nlohmann::json::parse(line);
+                            nlohmann::json msg;
                             if (j.contains("message")) {
-                                auto msg = nlohmann::json::parse(j["message"].get<std::string>());
-                                std::string ev = msg.value("event", "");
-                                std::string pid = msg.value("peer_id", "");
-                                std::string ep = msg.value("endpoint", "");
-                                std::string cat = msg.value("connected_at", "");
-
-                                std::lock_guard<std::mutex> lock(mutex_);
-                                if (ev == "join") {
-                                    bool exists = false;
-                                    for (auto& p : status_.connected_peers) {
-                                        if (p.id == pid) { exists = true; break; }
+                                if (j["message"].is_string()) {
+                                    try {
+                                        msg = nlohmann::json::parse(j["message"].get<std::string>());
+                                    } catch (...) {
+                                        continue;
                                     }
-                                    if (!exists && !pid.empty()) {
-                                        status_.connected_peers.push_back({
-                                            pid,
-                                            ep.empty() ? "Connected" : ep,
-                                            cat.empty() ? "Just now" : cat,
-                                            0, 0
-                                        });
-                                        std::cout << "[P2P] Registered peer: " << pid << " (" << ep << ")" << std::endl;
-                                    }
-                                } else if (ev == "leave") {
-                                    status_.connected_peers.erase(
-                                        std::remove_if(status_.connected_peers.begin(), status_.connected_peers.end(),
-                                            [&pid](const PeerInfo& p) { return p.id == pid; }),
-                                        status_.connected_peers.end()
-                                    );
-                                    std::cout << "[P2P] Peer left: " << pid << std::endl;
+                                } else if (j["message"].is_object()) {
+                                    msg = j["message"];
+                                } else {
+                                    continue;
                                 }
+                            } else if (j.is_object()) {
+                                msg = j;
+                            }
+
+                            std::string ev = msg.value("event", "");
+                            std::string pid = msg.value("peer_id", "");
+                            std::string ep = msg.value("endpoint", "");
+                            std::string cat = msg.value("connected_at", "");
+
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            if (ev == "join" || ev == "ping" || ev == "tunnel_connected") {
+                                bool exists = false;
+                                for (auto& p : status_.connected_peers) {
+                                    if (p.id == pid) {
+                                        exists = true;
+                                        if (ev == "tunnel_connected") {
+                                            p.endpoint = ep.empty() ? "Direct Tunnel Active" : ep;
+                                        }
+                                        break;
+                                    }
+                                }
+                                if (!exists && !pid.empty()) {
+                                    status_.connected_peers.push_back({
+                                        pid,
+                                        ev == "tunnel_connected" ? "Direct Tunnel Active" : (ep.empty() ? "Connected" : ep),
+                                        cat.empty() ? "Just now" : cat,
+                                        0, 0
+                                    });
+                                    std::cout << "[P2P] Registered peer: " << pid << " (" << ep << ")" << std::endl;
+                                }
+                            } else if (ev == "leave") {
+                                status_.connected_peers.erase(
+                                    std::remove_if(status_.connected_peers.begin(), status_.connected_peers.end(),
+                                        [&pid](const PeerInfo& p) { return p.id == pid; }),
+                                    status_.connected_peers.end()
+                                );
+                                std::cout << "[P2P] Peer left: " << pid << std::endl;
                             }
                         } catch (...) {}
                     }
@@ -481,7 +605,7 @@ void P2PManager::start_client_heartbeat() {
 
     client_heartbeat_thread_ = std::make_unique<std::thread>([this]() {
         while (client_heartbeat_running_) {
-            std::this_thread::sleep_for(std::chrono::seconds(15));
+            std::this_thread::sleep_for(std::chrono::seconds(10));
             if (!client_heartbeat_running_) break;
 
             std::string code;
@@ -500,6 +624,7 @@ void P2PManager::start_client_heartbeat() {
                 };
                 cpr::Post(
                     cpr::Url{"https://ntfy.sh/beacon_p2p_peers_" + code},
+                    cpr::Header{{"Content-Type", "text/plain; charset=utf-8"}},
                     cpr::Body{ping.dump()},
                     cpr::Timeout{2000}
                 );
@@ -516,7 +641,7 @@ void P2PManager::stop_client_heartbeat() {
     }
 }
 
-void P2PManager::start_client_proxy(uint16_t listen_port, const std::string& target_host_ip, uint16_t target_host_port) {
+void P2PManager::start_client_proxy(uint16_t listen_port, const std::string& primary_host_ip, const std::string& fallback_host_ip, uint16_t target_host_port) {
     stop_client_proxy();
 
     proxy_listen_socket_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -560,8 +685,13 @@ void P2PManager::start_client_proxy(uint16_t listen_port, const std::string& tar
     status_.local_proxy_port = bound_port;
     proxy_running_ = true;
 
-    client_listener_thread_ = std::make_unique<std::thread>([this, bound_port, target_host_ip, target_host_port]() {
-        std::cout << "[P2P] Local TCP proxy listening on 127.0.0.1:" << bound_port << " -> Forwarding to " << target_host_ip << ":" << target_host_port << std::endl;
+    client_listener_thread_ = std::make_unique<std::thread>([this, bound_port, primary_host_ip, fallback_host_ip, target_host_port]() {
+        std::cout << "[P2P] Local TCP proxy listening on 127.0.0.1:" << bound_port 
+                  << " -> Primary target: " << primary_host_ip << ":" << target_host_port;
+        if (!fallback_host_ip.empty() && fallback_host_ip != primary_host_ip) {
+            std::cout << " (Fallback: " << fallback_host_ip << ":" << target_host_port << ")";
+        }
+        std::cout << std::endl;
 
         while (proxy_running_) {
             struct sockaddr_in client_addr{};
@@ -577,12 +707,50 @@ void P2PManager::start_client_proxy(uint16_t listen_port, const std::string& tar
                 continue;
             }
 
-            std::cout << "[P2P] Minecraft client connected to local proxy! Bridging to " << target_host_ip << ":" << target_host_port << std::endl;
+            std::cout << "[P2P] Minecraft client connected to local proxy! Attempting connection to host..." << std::endl;
 
             // Connect to remote host and pipe streams bidirectionally
-            std::thread([client_sock, target_host_ip, target_host_port]() {
-                int remote_sock = socket(AF_INET, SOCK_STREAM, 0);
+            std::thread([this, client_sock, primary_host_ip, fallback_host_ip, target_host_port]() {
+                std::vector<std::string> candidates;
+                if (!primary_host_ip.empty()) candidates.push_back(primary_host_ip);
+                if (!fallback_host_ip.empty() && fallback_host_ip != primary_host_ip) {
+                    candidates.push_back(fallback_host_ip);
+                }
+                std::string my_ip = discover_local_ip();
+                if (primary_host_ip == my_ip || fallback_host_ip == my_ip || primary_host_ip == "127.0.0.1" || fallback_host_ip == "127.0.0.1") {
+                    if (std::find(candidates.begin(), candidates.end(), "127.0.0.1") == candidates.end()) {
+                        candidates.push_back("127.0.0.1");
+                    }
+                }
+
+                int remote_sock = -1;
+                std::string connected_ip;
+                for (const auto& candidate : candidates) {
+                    std::cout << "[P2P] Probing host endpoint " << candidate << ":" << target_host_port << "..." << std::endl;
+                    remote_sock = connect_with_timeout(candidate, target_host_port, 2500);
+                    if (remote_sock >= 0) {
+                        connected_ip = candidate;
+                        std::cout << "[P2P] Successfully connected to host at " << candidate << ":" << target_host_port << "!" << std::endl;
+                        break;
+                    } else {
+                        std::cout << "[P2P] Connection to " << candidate << ":" << target_host_port << " failed or timed out." << std::endl;
+                    }
+                }
+
                 if (remote_sock < 0) {
+                    std::string cand_str;
+                    for (size_t i = 0; i < candidates.size(); ++i) {
+                        if (i > 0) cand_str += ", ";
+                        cand_str += candidates[i];
+                    }
+                    std::string err = "Failed to connect to remote host (tried " + cand_str + " on port " + std::to_string(target_host_port) + "). Ensure the host has started their Minecraft server and has port " + std::to_string(target_host_port) + " open or UPnP enabled.";
+                    std::cerr << "[P2P] " << err << std::endl;
+
+                    {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        status_.error_message = err;
+                    }
+
 #ifdef _WIN32
                     closesocket(client_sock);
 #else
@@ -591,24 +759,48 @@ void P2PManager::start_client_proxy(uint16_t listen_port, const std::string& tar
                     return;
                 }
 
-                struct sockaddr_in raddr{};
-                raddr.sin_family = AF_INET;
-                raddr.sin_port = htons(target_host_port);
-                raddr.sin_addr.s_addr = inet_addr(target_host_ip.c_str());
-
-                if (connect(remote_sock, (struct sockaddr*)&raddr, sizeof(raddr)) < 0) {
-                    std::cerr << "[P2P] Failed to connect to remote host " << target_host_ip << ":" << target_host_port << std::endl;
-#ifdef _WIN32
-                    closesocket(remote_sock);
-                    closesocket(client_sock);
-#else
-                    close(remote_sock);
-                    close(client_sock);
-#endif
-                    return;
+                // Connection succeeded!
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    status_.error_message = "";
+                    client_primary_host_ip_ = connected_ip;
                 }
 
-                std::cout << "[P2P] Active bidirectional tunnel established between Minecraft client and host!" << std::endl;
+#ifdef _WIN32
+                int nodelay = 1;
+                setsockopt(client_sock, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
+                setsockopt(remote_sock, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
+#else
+                int nodelay = 1;
+                setsockopt(client_sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+                setsockopt(remote_sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+#endif
+
+                // Notify host signaling of active tunnel
+                std::string code;
+                std::string pid;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    code = status_.room_code;
+                    pid = my_client_peer_id_;
+                }
+                if (!code.empty() && !pid.empty()) {
+                    std::thread([code, pid, connected_ip]() {
+                        nlohmann::json ev = {
+                            {"event", "tunnel_connected"},
+                            {"peer_id", pid},
+                            {"endpoint", connected_ip}
+                        };
+                        cpr::Post(
+                            cpr::Url{"https://ntfy.sh/beacon_p2p_peers_" + code},
+                            cpr::Header{{"Content-Type", "text/plain; charset=utf-8"}},
+                            cpr::Body{ev.dump()},
+                            cpr::Timeout{2000}
+                        );
+                    }).detach();
+                }
+
+                std::cout << "[P2P] Active bidirectional tunnel established between Minecraft client and host (" << connected_ip << ":" << target_host_port << ")!" << std::endl;
 
                 auto forward_stream = [](int src, int dst, std::atomic<bool>& active) {
                     char buf[8192];
@@ -671,36 +863,58 @@ nlohmann::json P2PManager::start_host(const std::string& server_id, uint16_t tar
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (is_running_) {
-        if (status_.role == SessionRole::Host && status_.server_id == server_id) {
+        if (status_.role == SessionRole::Host && (server_id.empty() || status_.server_id == server_id)) {
             return {
                 {"status", "ok"},
                 {"room_code", status_.room_code},
                 {"public_endpoint", status_.public_endpoint},
                 {"local_endpoint", status_.local_endpoint},
-                {"target_port", status_.target_port}
+                {"target_port", status_.target_port},
+                {"upnp_active", status_.upnp_active}
             };
         }
         return {{"error", "A P2P session is already running. Please stop it first."}};
+    }
+
+    std::string active_server_id = server_id;
+    uint16_t active_port = target_port;
+
+    // Detect running server if server_id is "default" or empty
+    if (active_server_id.empty() || active_server_id == "default") {
+        try {
+            auto servers = get_servers();
+            for (const auto& s : servers) {
+                if (s.value("status", "") == "RUNNING") {
+                    active_server_id = s.value("id", "");
+                    if (target_port == 25565 && s.contains("port")) {
+                        active_port = static_cast<uint16_t>(s.value("port", 25565));
+                    }
+                    std::cout << "[P2P] Auto-associated with running server: " << active_server_id << " on port " << active_port << std::endl;
+                    break;
+                }
+            }
+        } catch (...) {}
     }
 
     std::string code = generate_room_code();
     status_.role = SessionRole::Host;
     status_.state = ConnectionState::Connecting;
     status_.room_code = code;
-    status_.server_id = server_id;
-    status_.target_port = target_port;
+    status_.server_id = active_server_id;
+    status_.target_port = active_port;
     status_.connected_peers.clear();
     status_.error_message = "";
 
     std::string local_ip = discover_local_ip();
-    status_.local_endpoint = local_ip + ":" + std::to_string(target_port);
+    status_.local_endpoint = local_ip + ":" + std::to_string(active_port);
 
-    status_.public_endpoint = discover_public_endpoint(target_port);
+    status_.public_endpoint = discover_public_endpoint(active_port);
     if (status_.public_endpoint.empty()) {
         status_.public_endpoint = status_.local_endpoint;
     }
 
-    bool upnp_ok = try_upnp_port_forward(target_port);
+    bool upnp_ok = try_upnp_port_forward(active_port);
+    status_.upnp_active = upnp_ok;
 
     // Announce room to signaling endpoint
     std::string pub_ip = status_.public_endpoint;
@@ -711,17 +925,17 @@ nlohmann::json P2PManager::start_host(const std::string& server_id, uint16_t tar
 
     nlohmann::json room_announcement = {
         {"room_code", code},
-        {"server_id", server_id},
+        {"server_id", active_server_id},
         {"public_ip", pub_ip},
         {"local_ip", local_ip},
-        {"port", target_port},
+        {"port", active_port},
         {"upnp", upnp_ok}
     };
 
     cpr::Post(
         cpr::Url{"https://ntfy.sh/beacon_p2p_room_" + code},
+        cpr::Header{{"Content-Type", "text/plain; charset=utf-8"}, {"Title", "Lobby Announced"}},
         cpr::Body{room_announcement.dump()},
-        cpr::Header{{"Title", "Lobby Announced"}},
         cpr::Timeout{3000}
     );
 
@@ -730,17 +944,19 @@ nlohmann::json P2PManager::start_host(const std::string& server_id, uint16_t tar
 
     start_host_signaling();
 
-    std::cout << "[P2P] Host session started for server " << server_id
+    std::cout << "[P2P] Host session started for server " << active_server_id
               << " | Room Code: " << code 
               << " | Public: " << status_.public_endpoint
-              << " | LAN: " << status_.local_endpoint << std::endl;
+              << " | LAN: " << status_.local_endpoint
+              << " | UPnP: " << (upnp_ok ? "Active" : "Inactive") << std::endl;
 
     return {
         {"status", "ok"},
         {"room_code", code},
         {"public_endpoint", status_.public_endpoint},
         {"local_endpoint", status_.local_endpoint},
-        {"target_port", target_port}
+        {"target_port", active_port},
+        {"upnp_active", upnp_ok}
     };
 }
 
@@ -760,6 +976,7 @@ nlohmann::json P2PManager::stop_host() {
         };
         cpr::Post(
             cpr::Url{"https://ntfy.sh/beacon_p2p_room_" + status_.room_code},
+            cpr::Header{{"Content-Type", "text/plain; charset=utf-8"}},
             cpr::Body{close_event.dump()},
             cpr::Timeout{2000}
         );
@@ -797,19 +1014,33 @@ nlohmann::json P2PManager::join_session(const std::string& room_code, uint16_t l
         return {{"error", "Please enter a valid room code or host address."}};
     }
 
-    std::string target_ip;
-    uint16_t target_port = 25565;
+    // Auto-prefix 4-character room codes with BCN-
+    if (clean_code.length() == 4 && clean_code.find('.') == std::string::npos && clean_code.find(':') == std::string::npos) {
+        clean_code = "BCN-" + clean_code;
+    }
 
-    // Check if input is a direct IP:Port (e.g. 192.168.0.11:25565 or 127.0.0.1:25565)
+    std::string primary_ip;
+    std::string fallback_ip;
+    uint16_t target_port = 25565;
+    bool is_direct_ip = false;
+
+    // Check if input is a direct IP:Port or IP address (e.g. 192.168.0.11:25565 or 192.168.0.11)
     auto colon_idx = clean_code.find(':');
     if (colon_idx != std::string::npos && clean_code.rfind("BCN-", 0) != 0) {
-        target_ip = clean_code.substr(0, colon_idx);
+        primary_ip = clean_code.substr(0, colon_idx);
         try {
             target_port = static_cast<uint16_t>(std::stoi(clean_code.substr(colon_idx + 1)));
         } catch (...) {
             target_port = 25565;
         }
-    } else {
+        is_direct_ip = true;
+    } else if (clean_code.find('.') != std::string::npos && clean_code.rfind("BCN-", 0) != 0) {
+        primary_ip = clean_code;
+        target_port = 25565;
+        is_direct_ip = true;
+    }
+
+    if (!is_direct_ip) {
         std::transform(clean_code.begin(), clean_code.end(), clean_code.begin(), ::toupper);
 
         // Query signaling endpoint for BCN-XXXX
@@ -833,14 +1064,25 @@ nlohmann::json P2PManager::join_session(const std::string& room_code, uint16_t l
             if (line.empty()) continue;
             try {
                 auto j = nlohmann::json::parse(line);
+                nlohmann::json msg;
                 if (j.contains("message")) {
-                    auto msg = nlohmann::json::parse(j["message"].get<std::string>());
-                    if (msg.contains("room_code") && msg["room_code"] == clean_code) {
-                        found_public_ip = msg.value("public_ip", "");
-                        found_local_ip = msg.value("local_ip", "");
-                        found_port = msg.value("port", 25565);
-                        found_room = true;
+                    if (j["message"].is_string()) {
+                        try {
+                            msg = nlohmann::json::parse(j["message"].get<std::string>());
+                        } catch (...) {
+                            continue;
+                        }
+                    } else if (j["message"].is_object()) {
+                        msg = j["message"];
                     }
+                } else if (j.is_object()) {
+                    msg = j;
+                }
+                if (msg.contains("room_code") && msg["room_code"] == clean_code) {
+                    found_public_ip = msg.value("public_ip", "");
+                    found_local_ip = msg.value("local_ip", "");
+                    found_port = msg.value("port", 25565);
+                    found_room = true;
                 }
             } catch (...) {}
         }
@@ -849,51 +1091,42 @@ nlohmann::json P2PManager::join_session(const std::string& room_code, uint16_t l
             return {{"error", "Lobby " + clean_code + " was not found. Please verify the code with the host."}};
         }
 
-        // Try local LAN address first if on same subnet, else public IP
         target_port = found_port;
-        bool local_reachable = false;
-        if (!found_local_ip.empty() && found_local_ip != "127.0.0.1") {
-            int test_sock = socket(AF_INET, SOCK_STREAM, 0);
-            if (test_sock >= 0) {
-                struct sockaddr_in test_addr{};
-                test_addr.sin_family = AF_INET;
-                test_addr.sin_port = htons(target_port);
-                test_addr.sin_addr.s_addr = inet_addr(found_local_ip.c_str());
 
-#ifdef _WIN32
-                DWORD tv = 1000;
-                setsockopt(test_sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
-                setsockopt(test_sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
-#else
-                struct timeval tv{1, 0};
-                setsockopt(test_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-                setsockopt(test_sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-#endif
-                if (connect(test_sock, (struct sockaddr*)&test_addr, sizeof(test_addr)) == 0) {
-                    local_reachable = true;
+        // Check if on same local subnet as host
+        std::string my_local_ip = discover_local_ip();
+        bool same_subnet = false;
+        if (!my_local_ip.empty() && !found_local_ip.empty()) {
+            if (my_local_ip == found_local_ip) {
+                same_subnet = true;
+            } else {
+                auto last_dot_my = my_local_ip.rfind('.');
+                auto last_dot_found = found_local_ip.rfind('.');
+                if (last_dot_my != std::string::npos && last_dot_found != std::string::npos) {
+                    if (my_local_ip.substr(0, last_dot_my) == found_local_ip.substr(0, last_dot_found)) {
+                        same_subnet = true;
+                    }
                 }
-#ifdef _WIN32
-                closesocket(test_sock);
-#else
-                close(test_sock);
-#endif
             }
         }
 
-        if (local_reachable) {
-            target_ip = found_local_ip;
-            std::cout << "[P2P] Connecting via LAN address: " << target_ip << ":" << target_port << std::endl;
-        } else if (!found_public_ip.empty()) {
-            target_ip = found_public_ip;
-            std::cout << "[P2P] Connecting via Public endpoint: " << target_ip << ":" << target_port << std::endl;
-        } else if (!found_local_ip.empty()) {
-            target_ip = found_local_ip;
+        if (!my_local_ip.empty() && my_local_ip == found_local_ip) {
+            primary_ip = "127.0.0.1";
+            fallback_ip = !found_local_ip.empty() ? found_local_ip : found_public_ip;
+            std::cout << "[P2P] Client and Host on same local machine (" << my_local_ip << "). Using loopback 127.0.0.1 as primary." << std::endl;
+        } else if (same_subnet) {
+            primary_ip = found_local_ip;
+            fallback_ip = found_public_ip;
+            std::cout << "[P2P] Client and Host on same local subnet (" << my_local_ip << " <-> " << found_local_ip << "). Using LAN as primary." << std::endl;
         } else {
-            return {{"error", "Host did not report a valid address."}};
+            primary_ip = !found_public_ip.empty() ? found_public_ip : found_local_ip;
+            fallback_ip = found_local_ip;
+            std::cout << "[P2P] Client and Host across network. Using WAN " << primary_ip << " as primary (Fallback: " << fallback_ip << ")." << std::endl;
         }
     }
 
-    client_target_host_ip_ = target_ip;
+    client_primary_host_ip_ = primary_ip;
+    client_fallback_host_ip_ = fallback_ip;
     client_target_host_port_ = target_port;
 
     status_.role = SessionRole::Client;
@@ -903,7 +1136,7 @@ nlohmann::json P2PManager::join_session(const std::string& room_code, uint16_t l
     status_.error_message = "";
 
     // Start local TCP client proxy forwarder
-    start_client_proxy(local_listen_port, target_ip, target_port);
+    start_client_proxy(local_listen_port, primary_ip, fallback_ip, target_port);
 
     // Announce client join to host
     my_client_peer_id_ = "Peer-" + std::to_string(rand() % 9000 + 1000);
@@ -920,6 +1153,7 @@ nlohmann::json P2PManager::join_session(const std::string& room_code, uint16_t l
 
     cpr::Post(
         cpr::Url{"https://ntfy.sh/beacon_p2p_peers_" + clean_code},
+        cpr::Header{{"Content-Type", "text/plain; charset=utf-8"}},
         cpr::Body{peer_event.dump()},
         cpr::Timeout{3000}
     );
@@ -930,13 +1164,13 @@ nlohmann::json P2PManager::join_session(const std::string& room_code, uint16_t l
     start_client_heartbeat();
 
     std::cout << "[P2P] Client bridged to room " << clean_code 
-              << " (" << target_ip << ":" << target_port << ") via local proxy 127.0.0.1:" << status_.local_proxy_port << std::endl;
+              << " (" << primary_ip << ":" << target_port << ") via local proxy 127.0.0.1:" << status_.local_proxy_port << std::endl;
 
     return {
         {"status", "ok"},
         {"room_code", clean_code},
         {"local_endpoint", "127.0.0.1:" + std::to_string(status_.local_proxy_port)},
-        {"target_endpoint", target_ip + ":" + std::to_string(target_port)}
+        {"target_endpoint", primary_ip + ":" + std::to_string(target_port)}
     };
 }
 
@@ -953,6 +1187,7 @@ nlohmann::json P2PManager::leave_session() {
         };
         cpr::Post(
             cpr::Url{"https://ntfy.sh/beacon_p2p_peers_" + status_.room_code},
+            cpr::Header{{"Content-Type", "text/plain; charset=utf-8"}},
             cpr::Body{leave_event.dump()},
             cpr::Timeout{2000}
         );
@@ -1006,6 +1241,7 @@ nlohmann::json P2PManager::get_status() {
         {"local_proxy_port", status_.local_proxy_port},
         {"public_endpoint", status_.public_endpoint},
         {"local_endpoint", status_.local_endpoint},
+        {"upnp_active", status_.upnp_active},
         {"error", status_.error_message},
         {"active_connections", peers_json}
     };

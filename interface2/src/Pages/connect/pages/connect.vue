@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { Copy, Check, Radio, Loader2, ArrowRight } from 'lucide-vue-next';
+import { Copy, Check, Radio, Loader2, ArrowRight, AlertCircle, Wifi, ShieldCheck } from 'lucide-vue-next';
 
 // --- State Management ---
 const roomCodeInput = ref('');
@@ -29,7 +29,7 @@ async function handleToggleConnection() {
     return disconnect();
   }
 
-  const code = roomCodeInput.value.trim().toUpperCase();
+  let code = roomCodeInput.value.trim();
   if (!code) return;
 
   errorMessage.value = '';
@@ -69,6 +69,7 @@ async function disconnect() {
   } finally {
     connectionStatus.value = 'idle';
     connectedRoomCode.value = '';
+    errorMessage.value = '';
   }
 }
 
@@ -81,6 +82,9 @@ async function syncStatus() {
         connectionStatus.value = 'active';
         connectedRoomCode.value = status.room_code;
         localProxyEndpoint.value = '127.0.0.1:' + (status.local_proxy_port || 25565);
+        if (status.error) {
+          errorMessage.value = status.error;
+        }
       } else if (status.role !== 'client' && isConnected.value) {
         connectionStatus.value = 'idle';
       }
@@ -122,15 +126,15 @@ onUnmounted(() => {
 
       <div class="server-info">
         <h3>Join Remote Session</h3>
-        <code>{{ isConnected ? 'Tunnel established to ' + connectedRoomCode : 'Enter a 4-character invite code below' }}</code>
+        <code>{{ isConnected ? 'Tunnel established to ' + connectedRoomCode : 'Enter a 4-character invite code or direct IP address below' }}</code>
       </div>
 
       <div class="input-stack">
-        <label>FRIEND'S LOBBY CODE</label>
+        <label>FRIEND'S LOBBY CODE OR IP</label>
         <div class="input-row">
           <input
             v-model="roomCodeInput"
-            placeholder="e.g. BCN-4821"
+            placeholder="e.g. BCN-4821 or 192.168.1.100:25565"
             class="fancy-input"
             :disabled="isConnected || isConnecting"
             @keyup.enter="handleToggleConnection"
@@ -148,7 +152,24 @@ onUnmounted(() => {
             </template>
           </button>
         </div>
-        <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+        <p class="input-hint">Tip: Works with 4-digit codes (e.g. 4821), BCN-XXXX codes, or direct IP:port.</p>
+      </div>
+
+      <!-- Connection Diagnostic Error Banner -->
+      <div v-if="errorMessage" class="error-diagnostic-banner">
+        <div class="diag-header">
+          <AlertCircle :size="16" class="icon-error" />
+          <span>Remote Host Connection Warning</span>
+        </div>
+        <p class="diag-text">{{ errorMessage }}</p>
+        <div class="diag-hints">
+          <span class="hint-title">Diagnostic Checklist:</span>
+          <ul>
+            <li>Ensure the host has actively started their Minecraft server.</li>
+            <li>If playing on the same local Wi-Fi or LAN, connect directly using the host's LAN IP.</li>
+            <li>If playing over the internet, verify UPnP is enabled on the host router or forward port 25565.</li>
+          </ul>
+        </div>
       </div>
 
       <!-- Connection Success Box -->
@@ -236,6 +257,13 @@ h1 {
   align-items: center;
 }
 
+.card-head h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
 .status-pill {
   display: flex;
   align-items: center;
@@ -252,11 +280,6 @@ h1 {
 .online .status-pill {
   color: #166534;
   background: #dcfce7;
-}
-
-.status-pill.mini {
-  padding: 4px 10px;
-  font-size: 0.7rem;
 }
 
 .dot {
@@ -299,18 +322,18 @@ h1 {
   font-size: 0.85rem;
 }
 
+/* Input Stack */
 .input-stack {
+  margin-top: 24px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 24px 0 10px;
 }
 
 .input-stack label {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 800;
-  color: #e5e5e8;
-  text-transform: uppercase;
+  color: #86868b;
   letter-spacing: 0.5px;
 }
 
@@ -321,40 +344,38 @@ h1 {
 
 .fancy-input {
   flex: 1;
-  background: rgba(7, 6, 6, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 14px 18px;
-  border-radius: 16px;
-  font-size: 1.1rem;
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: #fffffc;
+  border-radius: 14px;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
   outline: none;
   transition: all 0.2s;
 }
 
 .fancy-input:focus {
   border-color: #0071e3;
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.3);
 }
 
 .fancy-input:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .btn-action-inline {
   border: none;
-  padding: 0 24px;
-  border-radius: 16px;
+  padding: 0 28px;
+  border-radius: 14px;
   font-weight: 800;
-  font-size: 0.85rem;
-  letter-spacing: 0.5px;
+  font-size: 0.9rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   transition: all 0.2s;
 }
 
@@ -363,7 +384,7 @@ h1 {
   color: white;
 }
 
-.btn-action-inline.offline:hover:not(:disabled) {
+.btn-action-inline.offline:hover {
   background: #0077ed;
 }
 
@@ -372,7 +393,7 @@ h1 {
   color: white;
 }
 
-.btn-action-inline.running:hover:not(:disabled) {
+.btn-action-inline.running:hover {
   background: #e02e24;
 }
 
@@ -381,10 +402,67 @@ h1 {
   cursor: not-allowed;
 }
 
-.error-text {
-  color: #ff6961;
+.input-hint {
+  color: #86868b;
+  font-size: 0.75rem;
+  margin: 2px 0 0;
+}
+
+/* Diagnostic Error Banner */
+.error-diagnostic-banner {
+  margin-top: 20px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 16px;
+  padding: 16px 20px;
+  color: #fca5a5;
   font-size: 0.85rem;
-  margin: 4px 0 0;
+}
+
+.diag-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  color: #ef4444;
+  margin-bottom: 6px;
+  font-size: 0.9rem;
+}
+
+.icon-error {
+  color: #ef4444;
+  flex-shrink: 0;
+}
+
+.diag-text {
+  margin: 0 0 10px;
+  color: #fecaca;
+  line-height: 1.4;
+  font-family: monospace;
+  font-size: 0.82rem;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.diag-hints {
+  font-size: 0.8rem;
+  color: #d1d5db;
+}
+
+.hint-title {
+  font-weight: 700;
+  color: #f3f4f6;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.diag-hints ul {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 /* Success Panel */
