@@ -41,6 +41,7 @@ struct SessionStatus {
     uint16_t target_port = 25565;
     uint16_t local_proxy_port = 25565;
     std::string public_endpoint;
+    std::string local_endpoint;
     std::string error_message;
     std::vector<PeerInfo> connected_peers;
 };
@@ -60,8 +61,9 @@ public:
     // Status query
     nlohmann::json get_status();
 
-    // UPnP discovery helper
+    // UPnP discovery helpers
     bool try_upnp_port_forward(uint16_t port);
+    bool delete_upnp_port_forward(uint16_t port);
 
 private:
     P2PManager();
@@ -69,18 +71,42 @@ private:
 
     std::string generate_room_code();
     std::string discover_public_endpoint(uint16_t local_port);
+    std::string discover_local_ip();
 
     // Client local TCP proxy listener
-    void start_client_proxy(uint16_t listen_port);
+    void start_client_proxy(uint16_t listen_port, const std::string& target_host_ip, uint16_t target_host_port);
     void stop_client_proxy();
+
+    // Background signaling workers
+    void start_host_signaling();
+    void stop_host_signaling();
+
+    void start_client_heartbeat();
+    void stop_client_heartbeat();
 
     std::mutex mutex_;
     SessionStatus status_;
     std::atomic<bool> is_running_{false};
+
+    // Client Proxy state
     std::atomic<bool> proxy_running_{false};
     int proxy_listen_socket_{-1};
-
     std::unique_ptr<std::thread> client_listener_thread_;
+    std::string client_target_host_ip_;
+    uint16_t client_target_host_port_{25565};
+
+    // Host signaling state
+    std::atomic<bool> host_signaling_running_{false};
+    std::unique_ptr<std::thread> host_signaling_thread_;
+
+    // Client heartbeat state
+    std::atomic<bool> client_heartbeat_running_{false};
+    std::unique_ptr<std::thread> client_heartbeat_thread_;
+    std::string my_client_peer_id_;
+
+    // UPnP state
+    std::string upnp_control_url_;
+    std::string upnp_service_type_;
 };
 
 } // namespace beacon::p2p
