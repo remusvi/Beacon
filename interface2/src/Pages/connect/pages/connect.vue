@@ -6,8 +6,11 @@ import { Copy, Check, Radio, Loader2, ArrowRight, AlertCircle, Wifi, ShieldCheck
 const roomCodeInput = ref('');
 const connectionStatus = ref('idle'); // idle | connecting | active | error
 const errorMessage = ref('');
+const warningMessage = ref('');
 const localProxyEndpoint = ref('127.0.0.1:25565');
 const connectedRoomCode = ref('');
+const hostReachable = ref(true);
+const targetEndpoint = ref('');
 const copied = ref(false);
 
 // --- Computed UI State ---
@@ -33,6 +36,7 @@ async function handleToggleConnection() {
   if (!code) return;
 
   errorMessage.value = '';
+  warningMessage.value = '';
   connectionStatus.value = 'connecting';
 
   try {
@@ -47,6 +51,13 @@ async function handleToggleConnection() {
         connectionStatus.value = 'active';
         connectedRoomCode.value = res.room_code || code;
         localProxyEndpoint.value = res.local_endpoint || '127.0.0.1:25565';
+        hostReachable.value = res.host_reachable !== false;
+        targetEndpoint.value = res.target_endpoint || '';
+        if (res.warning) {
+          warningMessage.value = res.warning;
+        } else {
+          warningMessage.value = '';
+        }
       }
     } else {
       errorMessage.value = "Native P2P client bridge not available.";
@@ -70,6 +81,9 @@ async function disconnect() {
     connectionStatus.value = 'idle';
     connectedRoomCode.value = '';
     errorMessage.value = '';
+    warningMessage.value = '';
+    hostReachable.value = true;
+    targetEndpoint.value = '';
   }
 }
 
@@ -82,8 +96,16 @@ async function syncStatus() {
         connectionStatus.value = 'active';
         connectedRoomCode.value = status.room_code;
         localProxyEndpoint.value = '127.0.0.1:' + (status.local_proxy_port || 25565);
+        if (status.host_reachable !== undefined) {
+          hostReachable.value = !!status.host_reachable;
+        }
+        if (status.public_endpoint) {
+          targetEndpoint.value = status.public_endpoint;
+        }
         if (status.error) {
-          errorMessage.value = status.error;
+          warningMessage.value = status.error;
+        } else {
+          warningMessage.value = '';
         }
       } else if (status.role !== 'client' && isConnected.value) {
         connectionStatus.value = 'idle';
@@ -114,19 +136,21 @@ onUnmounted(() => {
 
     <div class="card" :class="{ 'online': isConnected }">
       <div class="card-head">
-        <div class="status-pill">
+        <div class="status-pill" :class="{ 'warning-pill': isConnected && !hostReachable }">
           <span class="dot"></span>
-          <span>{{ isConnected ? 'Connected' : (isConnecting ? 'Bridging...' : 'Offline') }}</span>
+          <span>{{ isConnected ? (hostReachable ? 'Connected' : 'Host Unreachable') : (isConnecting ? 'Bridging...' : 'Offline') }}</span>
         </div>
         <div class="badge-group">
           <span class="type-badge">P2P CLIENT</span>
-          <span class="version-badge">{{ isConnected ? 'BRIDGE ACTIVE' : 'READY' }}</span>
+          <span class="version-badge" :class="{ 'warn-badge': isConnected && !hostReachable }">
+            {{ isConnected ? (hostReachable ? 'BRIDGE ACTIVE' : 'HOST UNREACHABLE') : 'READY' }}
+          </span>
         </div>
       </div>
 
       <div class="server-info">
         <h3>Join Remote Session</h3>
-        <code>{{ isConnected ? 'Tunnel established to ' + connectedRoomCode : 'Enter a 4-character invite code or direct IP address below' }}</code>
+        <code>{{ isConnected ? ('Tunnel established to ' + connectedRoomCode + (targetEndpoint ? ' (' + targetEndpoint + ')' : '')) : 'Enter an invite code (BCN-XXXX) or direct IP:port below' }}</code>
       </div>
 
       <div class="input-stack">
@@ -152,22 +176,38 @@ onUnmounted(() => {
             </template>
           </button>
         </div>
-        <p class="input-hint">Tip: Works with 4-digit codes (e.g. 4821), BCN-XXXX codes, or direct IP:port.</p>
+        <p class="input-hint">Tip: Works with BCN invite codes, 4-digit codes, or direct IP:port.</p>
       </div>
 
-      <!-- Connection Diagnostic Error Banner -->
+      <!-- Connection Diagnostic Error Banner (Connection completely failed) -->
       <div v-if="errorMessage" class="error-diagnostic-banner">
         <div class="diag-header">
           <AlertCircle :size="16" class="icon-error" />
-          <span>Remote Host Connection Warning</span>
+          <span>Connection Failed</span>
         </div>
         <p class="diag-text">{{ errorMessage }}</p>
         <div class="diag-hints">
           <span class="hint-title">Diagnostic Checklist:</span>
           <ul>
-            <li>Ensure the host has actively started their Minecraft server.</li>
-            <li>If playing on the same local Wi-Fi or LAN, connect directly using the host's LAN IP.</li>
-            <li>If playing over the internet, verify UPnP is enabled on the host router or forward port 25565.</li>
+            <li>Ask the host for their updated <strong>BCN invite code</strong> or direct IP:Port.</li>
+            <li>Make sure the host has clicked "HOST LOBBY" in Beacon.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Warning Banner when bridge is up but remote host is unreachable -->
+      <div v-if="isConnected && (!hostReachable || warningMessage)" class="warning-diagnostic-banner">
+        <div class="diag-header warn">
+          <AlertCircle :size="16" class="icon-warn" />
+          <span>Remote Minecraft Server Unreachable</span>
+        </div>
+        <p class="diag-text">{{ warningMessage || 'The local bridge is running on ' + localProxyEndpoint + ', but the remote server at ' + (targetEndpoint || connectedRoomCode) + ' is not responding or rejected connection probes.' }}</p>
+        <div class="diag-hints">
+          <span class="hint-title">Troubleshooting Checklist:</span>
+          <ul>
+            <li><strong>Host Minecraft Server:</strong> Ensure the host has actively started their Minecraft server (in Beacon's Servers tab or singleplayer "Open to LAN").</li>
+            <li><strong>Same Wi-Fi / Local Network:</strong> Connect using the host's <strong>LAN Invite Code</strong> or direct LAN IP (e.g. <code>192.168.x.x:25565</code>). Many home routers block connecting to your own public IP.</li>
+            <li><strong>Internet / Remote Play:</strong> Ensure the host's router has <strong>UPnP enabled</strong> or has port 25565 forwarded to their computer.</li>
           </ul>
         </div>
       </div>
@@ -280,6 +320,22 @@ h1 {
 .online .status-pill {
   color: #166534;
   background: #dcfce7;
+}
+
+.status-pill.warning-pill {
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.status-pill.warning-pill .dot {
+  background: #f59e0b;
+  box-shadow: 0 0 10px #f59e0b;
+}
+
+.version-badge.warn-badge {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
 .dot {
@@ -417,6 +473,25 @@ h1 {
   padding: 16px 20px;
   color: #fca5a5;
   font-size: 0.85rem;
+}
+
+.warning-diagnostic-banner {
+  margin-top: 20px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 16px;
+  padding: 16px 20px;
+  color: #fde68a;
+  font-size: 0.85rem;
+}
+
+.diag-header.warn {
+  color: #f59e0b;
+}
+
+.icon-warn {
+  color: #f59e0b;
+  flex-shrink: 0;
 }
 
 .diag-header {

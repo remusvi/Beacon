@@ -6,15 +6,19 @@ const isHosting = ref(false);
 const isUpdating = ref(false);
 const errorMsg = ref('');
 const roomCode = ref('');
+const lanRoomCode = ref('');
 const publicEndpoint = ref('');
 const localEndpoint = ref('');
 const targetPort = ref(25565);
 const upnpActive = ref(false);
+const serverListening = ref(false);
 const hasRunningServer = ref(false);
 const runningServerName = ref('');
 const activeConnections = ref([]);
 const copied = ref(false);
+const copiedLan = ref(false);
 const copiedEndpoint = ref(false);
+const copiedLocalEndpoint = ref(false);
 
 async function copyRoomCode() {
   if (!roomCode.value) return;
@@ -27,6 +31,17 @@ async function copyRoomCode() {
   }
 }
 
+async function copyLanRoomCode() {
+  if (!lanRoomCode.value) return;
+  try {
+    await navigator.clipboard.writeText(lanRoomCode.value);
+    copiedLan.value = true;
+    setTimeout(() => { copiedLan.value = false; }, 2000);
+  } catch (err) {
+    console.error('Failed to copy LAN code:', err);
+  }
+}
+
 async function copyDirectEndpoint() {
   const ep = publicEndpoint.value || localEndpoint.value;
   if (!ep) return;
@@ -36,6 +51,17 @@ async function copyDirectEndpoint() {
     setTimeout(() => { copiedEndpoint.value = false; }, 2000);
   } catch (err) {
     console.error('Failed to copy endpoint:', err);
+  }
+}
+
+async function copyLocalEndpoint() {
+  if (!localEndpoint.value) return;
+  try {
+    await navigator.clipboard.writeText(localEndpoint.value);
+    copiedLocalEndpoint.value = true;
+    setTimeout(() => { copiedLocalEndpoint.value = false; }, 2000);
+  } catch (err) {
+    console.error('Failed to copy local endpoint:', err);
   }
 }
 
@@ -77,9 +103,11 @@ async function toggleHost() {
         } else {
           isHosting.value = true;
           roomCode.value = res.room_code || '';
+          lanRoomCode.value = res.lan_room_code || '';
           publicEndpoint.value = res.public_endpoint || 'NAT Reflexive Discovery';
           localEndpoint.value = res.local_endpoint || '';
           upnpActive.value = !!res.upnp_active;
+          serverListening.value = !!res.server_listening;
           if (res.target_port) targetPort.value = res.target_port;
         }
       } else {
@@ -91,9 +119,11 @@ async function toggleHost() {
       }
       isHosting.value = false;
       roomCode.value = '';
+      lanRoomCode.value = '';
       publicEndpoint.value = '';
       localEndpoint.value = '';
       upnpActive.value = false;
+      serverListening.value = false;
       activeConnections.value = [];
     }
   } catch (err) {
@@ -112,9 +142,11 @@ async function fetchStatus() {
       if (status.role === 'host' && status.status === 'active') {
         isHosting.value = true;
         roomCode.value = status.room_code || '';
+        lanRoomCode.value = status.lan_room_code || '';
         publicEndpoint.value = status.public_endpoint || '';
         localEndpoint.value = status.local_endpoint || '';
         upnpActive.value = !!status.upnp_active;
+        serverListening.value = !!status.server_listening;
         if (status.target_port) targetPort.value = status.target_port;
         activeConnections.value = status.active_connections || [];
       } else if (status.role !== 'host') {
@@ -171,36 +203,89 @@ onUnmounted(() => {
       </div>
 
       <!-- Server Running / Warning Status -->
-      <div v-if="hasRunningServer" class="server-status-banner running">
+      <div v-if="hasRunningServer && serverListening" class="server-status-banner running">
         <Server :size="14" class="icon-server" />
-        <span>Connected to active server: <strong>{{ runningServerName }}</strong> (Port {{ targetPort }})</span>
+        <span>Minecraft Server is active & listening: <strong>{{ runningServerName }}</strong> (Port {{ targetPort }})</span>
+      </div>
+      <div v-else-if="hasRunningServer && !serverListening" class="server-status-banner idle">
+        <Loader2 :size="14" class="icon-warn spin" />
+        <span>Server <strong>{{ runningServerName }}</strong> is running, but port {{ targetPort }} is not listening yet. Please wait a moment.</span>
       </div>
       <div v-else class="server-status-banner idle">
         <AlertCircle :size="14" class="icon-warn" />
         <span>No server is currently running. Start your server in the Servers tab so friends can join your world.</span>
       </div>
 
-      <div v-if="isHosting" class="lobby-code-section">
-        <label class="section-label">LOBBY INVITE CODE</label>
-        <div class="code-box">
-          <span class="code-text">{{ roomCode }}</span>
-          <button class="btn-copy" @click="copyRoomCode">
-            <Check v-if="copied" :size="14" class="icon-success" />
-            <Copy v-else :size="14" />
-            {{ copied ? 'COPIED' : 'COPY CODE' }}
-          </button>
+      <!-- Port Configuration (when not hosting) -->
+      <div v-if="!isHosting" class="port-config-row">
+        <label class="port-label">HOST TARGET PORT:</label>
+        <div class="port-input-wrapper">
+          <input
+            v-model.number="targetPort"
+            type="number"
+            min="1024"
+            max="65535"
+            class="port-input"
+            placeholder="25565"
+          />
+          <span class="port-hint">(Default 25565, or enter your "Open to LAN" port)</span>
         </div>
-        <p class="code-hint">Share this code with friends to let them join from their Beacon app.</p>
+      </div>
 
-        <!-- Direct Connection Info for LAN/Direct IP -->
+      <div v-if="isHosting" class="lobby-code-section">
+        <div class="code-grid">
+          <div class="code-card">
+            <label class="section-label">INTERNET INVITE CODE</label>
+            <div class="code-box">
+              <span class="code-text">{{ roomCode }}</span>
+              <button class="btn-copy" @click="copyRoomCode">
+                <Check v-if="copied" :size="14" class="icon-success" />
+                <Copy v-else :size="14" />
+                {{ copied ? 'COPIED' : 'COPY CODE' }}
+              </button>
+            </div>
+            <p class="code-hint">Share with friends connecting over the internet.</p>
+          </div>
+
+          <div v-if="lanRoomCode" class="code-card">
+            <label class="section-label">LAN INVITE CODE (SAME WI-FI)</label>
+            <div class="code-box">
+              <span class="code-text">{{ lanRoomCode }}</span>
+              <button class="btn-copy" @click="copyLanRoomCode">
+                <Check v-if="copiedLan" :size="14" class="icon-success" />
+                <Copy v-else :size="14" />
+                {{ copiedLan ? 'COPIED' : 'COPY LAN' }}
+              </button>
+            </div>
+            <p class="code-hint">Share with friends on the same home Wi-Fi or local network.</p>
+          </div>
+        </div>
+
+        <!-- Direct Connection Endpoints for IP:Port -->
         <div class="direct-endpoint-box">
-          <span class="direct-label">DIRECT HOST ENDPOINT:</span>
-          <code class="direct-val">{{ publicEndpoint || localEndpoint }}</code>
-          <button class="btn-copy-mini" @click="copyDirectEndpoint">
-            <Check v-if="copiedEndpoint" :size="12" class="icon-success" />
-            <Copy v-else :size="12" />
-            {{ copiedEndpoint ? 'COPIED' : 'COPY' }}
-          </button>
+          <div class="direct-row">
+            <span class="direct-label">PUBLIC IP:</span>
+            <code class="direct-val">{{ publicEndpoint }}</code>
+            <button class="btn-copy-mini" @click="copyDirectEndpoint">
+              <Check v-if="copiedEndpoint" :size="12" class="icon-success" />
+              <Copy v-else :size="12" />
+              {{ copiedEndpoint ? 'COPIED' : 'COPY' }}
+            </button>
+          </div>
+          <div v-if="localEndpoint && localEndpoint !== publicEndpoint" class="direct-row">
+            <span class="direct-label">LAN IP:</span>
+            <code class="direct-val">{{ localEndpoint }}</code>
+            <button class="btn-copy-mini" @click="copyLocalEndpoint">
+              <Check v-if="copiedLocalEndpoint" :size="12" class="icon-success" />
+              <Copy v-else :size="12" />
+              {{ copiedLocalEndpoint ? 'COPIED' : 'COPY' }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="!upnpActive" class="upnp-notice">
+          <AlertCircle :size="13" class="icon-warn" />
+          <span>UPnP port forwarding not active on router. Friends on the same Wi-Fi can join instantly using the LAN Code. For friends over the internet, ensure port {{ targetPort }} is forwarded in your router settings.</span>
         </div>
       </div>
 
@@ -399,6 +484,50 @@ h1 {
   color: #fcd34d;
 }
 
+.port-config-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.port-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #86868b;
+  letter-spacing: 0.5px;
+}
+
+.port-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.port-input {
+  width: 140px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 8px 14px;
+  border-radius: 12px;
+  color: #ffffff;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.port-input:focus {
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.3);
+}
+
+.port-hint {
+  font-size: 0.78rem;
+  color: #86868b;
+}
+
 .icon-server {
   color: #22c55e;
   flex-shrink: 0;
@@ -415,6 +544,20 @@ h1 {
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 16px 20px;
   border-radius: 18px;
+}
+
+.code-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.code-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 12px 16px;
 }
 
 .section-label {
@@ -434,7 +577,7 @@ h1 {
 
 .code-text {
   font-family: 'SF Mono', Monaco, Consolas, monospace;
-  font-size: 1.6rem;
+  font-size: 1.45rem;
   font-weight: 800;
   letter-spacing: 2px;
   color: #00abf0;
@@ -467,11 +610,17 @@ h1 {
 
 .direct-endpoint-box {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.direct-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .direct-label {
@@ -479,6 +628,7 @@ h1 {
   font-weight: 800;
   color: #86868b;
   letter-spacing: 0.5px;
+  min-width: 65px;
 }
 
 .direct-val {
@@ -505,6 +655,20 @@ h1 {
 
 .btn-copy-mini:hover {
   background: rgba(255, 255, 255, 0.18);
+}
+
+.upnp-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 12px;
+  font-size: 0.78rem;
+  color: #fcd34d;
+  line-height: 1.4;
 }
 
 .card-actions {

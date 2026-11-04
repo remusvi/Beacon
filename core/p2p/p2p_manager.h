@@ -37,6 +37,7 @@ struct SessionStatus {
     SessionRole role = SessionRole::None;
     ConnectionState state = ConnectionState::Idle;
     std::string room_code;
+    std::string lan_room_code;
     std::string server_id;
     uint16_t target_port = 25565;
     uint16_t local_proxy_port = 25565;
@@ -44,6 +45,8 @@ struct SessionStatus {
     std::string local_endpoint;
     std::string error_message;
     bool upnp_active = false;
+    bool server_listening = false;
+    bool host_reachable = false;
     std::vector<PeerInfo> connected_peers;
 };
 
@@ -65,6 +68,11 @@ public:
     // UPnP discovery helpers
     bool try_upnp_port_forward(uint16_t port);
     bool delete_upnp_port_forward(uint16_t port);
+
+    // Endpoint code encoding / decoding (Self-contained zero-cloud codes)
+    static std::string encode_endpoint_code(const std::string& ip, uint16_t port);
+    static bool decode_endpoint_code(const std::string& code, std::string& out_ip, uint16_t& out_port);
+    static bool is_port_listening_locally(uint16_t port);
 
 private:
     P2PManager();
