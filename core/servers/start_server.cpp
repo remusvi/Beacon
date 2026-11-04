@@ -33,6 +33,9 @@ static std::mutex server_mutex;
 bool is_server_running(const std::string& server_id) {
     std::lock_guard<std::mutex> lock(server_mutex);
     auto it = running_servers.find(server_id);
+    if (it == running_servers.end() && running_servers.size() == 1 && !server_id.empty()) {
+        it = running_servers.begin();
+    }
     if (it != running_servers.end() && it->second.process) {
         if (it->second.process->running()) {
             return true;
@@ -47,11 +50,14 @@ bool is_server_running(const std::string& server_id) {
 bool send_server_command(const std::string& server_id, const std::string& command) {
     std::lock_guard<std::mutex> lock(server_mutex);
     auto it = running_servers.find(server_id);
+    if (it == running_servers.end() && running_servers.size() == 1) {
+        it = running_servers.begin();
+    }
     if (it != running_servers.end() && it->second.process && it->second.process->running() && it->second.in) {
         try {
             *(it->second.in) << command << std::endl;
             it->second.in->flush();
-            std::cout << "Sent command to server " << server_id << ": " << command << std::endl;
+            std::cout << "Sent command to server " << it->first << ": " << command << std::endl;
             return true;
         } catch (const std::exception& e) {
             std::cerr << "Failed to send command to server " << server_id << ": " << e.what() << std::endl;

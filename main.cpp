@@ -134,10 +134,17 @@ int main() {
             }
         });
 
-        main_window.bind("getServerPlayers", [](const std::string& req) -> std::string {
+        auto parse_server_id = [](const jlib::json& val) -> std::string {
+            if (val.is_string()) return val.get<std::string>();
+            if (val.is_number_integer()) return std::to_string(val.get<int64_t>());
+            if (val.is_number()) return std::to_string(static_cast<int64_t>(val.get<double>()));
+            return val.dump();
+        };
+
+        main_window.bind("getServerPlayers", [&](const std::string& req) -> std::string {
             try {
                 auto data = jlib::json::parse(req);
-                std::string server_id = data.at(0).get<std::string>();
+                std::string server_id = parse_server_id(data.at(0));
                 return get_server_players(server_id).dump();
             } catch (const std::exception& e) {
                 std::cerr << "getServerPlayers error: " << e.what() << std::endl;
@@ -145,10 +152,10 @@ int main() {
             }
         });
 
-        main_window.bind("opPlayer", [](const std::string& req) -> std::string {
+        main_window.bind("opPlayer", [&](const std::string& req) -> std::string {
             try {
                 auto data = jlib::json::parse(req);
-                std::string server_id = data.at(0).get<std::string>();
+                std::string server_id = parse_server_id(data.at(0));
                 std::string player_name = data.at(1).get<std::string>();
                 bool ok = op_player(server_id, player_name);
                 return ok ? "{\"status\":\"ok\"}" : "{\"error\":\"Server not running or op command failed\"}";
@@ -158,10 +165,10 @@ int main() {
             }
         });
 
-        main_window.bind("deopPlayer", [](const std::string& req) -> std::string {
+        main_window.bind("deopPlayer", [&](const std::string& req) -> std::string {
             try {
                 auto data = jlib::json::parse(req);
-                std::string server_id = data.at(0).get<std::string>();
+                std::string server_id = parse_server_id(data.at(0));
                 std::string player_name = data.at(1).get<std::string>();
                 bool ok = deop_player(server_id, player_name);
                 return ok ? "{\"status\":\"ok\"}" : "{\"error\":\"Server not running or deop command failed\"}";
@@ -171,12 +178,12 @@ int main() {
             }
         });
 
-        main_window.bind("kickPlayer", [](const std::string& req) -> std::string {
+        main_window.bind("kickPlayer", [&](const std::string& req) -> std::string {
             try {
                 auto data = jlib::json::parse(req);
-                std::string server_id = data.at(0).get<std::string>();
+                std::string server_id = parse_server_id(data.at(0));
                 std::string player_name = data.at(1).get<std::string>();
-                std::string reason = (data.size() > 2) ? data.at(2).get<std::string>() : "Kicked by operator";
+                std::string reason = (data.size() > 2 && data.at(2).is_string()) ? data.at(2).get<std::string>() : "Kicked by operator";
                 bool ok = kick_player(server_id, player_name, reason);
                 return ok ? "{\"status\":\"ok\"}" : "{\"error\":\"Server not running or kick command failed\"}";
             } catch (const std::exception& e) {
@@ -185,12 +192,12 @@ int main() {
             }
         });
 
-        main_window.bind("banPlayer", [](const std::string& req) -> std::string {
+        main_window.bind("banPlayer", [&](const std::string& req) -> std::string {
             try {
                 auto data = jlib::json::parse(req);
-                std::string server_id = data.at(0).get<std::string>();
+                std::string server_id = parse_server_id(data.at(0));
                 std::string player_name = data.at(1).get<std::string>();
-                std::string reason = (data.size() > 2) ? data.at(2).get<std::string>() : "Banned by operator";
+                std::string reason = (data.size() > 2 && data.at(2).is_string()) ? data.at(2).get<std::string>() : "Banned by operator";
                 bool ok = ban_player(server_id, player_name, reason);
                 return ok ? "{\"status\":\"ok\"}" : "{\"error\":\"Server not running or ban command failed\"}";
             } catch (const std::exception& e) {
@@ -199,10 +206,10 @@ int main() {
             }
         });
 
-        main_window.bind("sendServerCommand", [](const std::string& req) -> std::string {
+        main_window.bind("sendServerCommand", [&](const std::string& req) -> std::string {
             try {
                 auto data = jlib::json::parse(req);
-                std::string server_id = data.at(0).get<std::string>();
+                std::string server_id = parse_server_id(data.at(0));
                 std::string command = data.at(1).get<std::string>();
                 bool ok = send_server_command(server_id, command);
                 return ok ? "{\"status\":\"ok\"}" : "{\"error\":\"Server not running or command failed\"}";
@@ -212,10 +219,10 @@ int main() {
             }
         });
 
-        main_window.bind("getServerLogs", [](const std::string& req) -> std::string {
+        main_window.bind("getServerLogs", [&](const std::string& req) -> std::string {
             try {
                 auto data = jlib::json::parse(req);
-                std::string server_id = data.at(0).get<std::string>();
+                std::string server_id = parse_server_id(data.at(0));
                 int max_lines = 150;
                 if (data.size() > 1 && data.at(1).is_number()) {
                     max_lines = data.at(1).get<int>();
