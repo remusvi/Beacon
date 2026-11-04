@@ -737,28 +737,28 @@ bool P2PManager::try_upnp_port_forward(uint16_t port) {
     dest.sin_port = htons(1900);
     dest.sin_addr.s_addr = inet_addr("239.255.255.250");
 
-    std::string msg1 = 
+    std::string msg1 =
         "M-SEARCH * HTTP/1.1\r\n"
         "HOST: 239.255.255.250:1900\r\n"
         "MAN: \"ssdp:discover\"\r\n"
         "MX: 2\r\n"
         "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n";
 
-    std::string msg2 = 
+    std::string msg2 =
         "M-SEARCH * HTTP/1.1\r\n"
         "HOST: 239.255.255.250:1900\r\n"
         "MAN: \"ssdp:discover\"\r\n"
         "MX: 2\r\n"
         "ST: urn:schemas-upnp-org:service:WANIPConnection:1\r\n\r\n";
 
-    std::string msg3 = 
+    std::string msg3 =
         "M-SEARCH * HTTP/1.1\r\n"
         "HOST: 239.255.255.250:1900\r\n"
         "MAN: \"ssdp:discover\"\r\n"
         "MX: 2\r\n"
         "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:2\r\n\r\n";
 
-    std::string msg4 = 
+    std::string msg4 =
         "M-SEARCH * HTTP/1.1\r\n"
         "HOST: 239.255.255.250:1900\r\n"
         "MAN: \"ssdp:discover\"\r\n"
@@ -1032,7 +1032,7 @@ void P2PManager::start_client_proxy(uint16_t listen_port, const std::string& pri
     proxy_running_ = true;
 
     client_listener_thread_ = std::make_unique<std::thread>([this, bound_port, primary_host_ip, fallback_host_ip, target_host_port]() {
-        std::cout << "[P2P] Local TCP proxy listening on 127.0.0.1:" << bound_port 
+        std::cout << "[P2P] Local TCP proxy listening on 127.0.0.1:" << bound_port
                   << " -> Target: " << primary_host_ip << ":" << target_host_port << std::endl;
 
         while (proxy_running_) {
@@ -1227,33 +1227,39 @@ nlohmann::json P2PManager::start_host(const std::string& server_id, uint16_t tar
     status_.upnp_active = upnp_ok;
     status_.server_listening = is_port_listening_locally(active_port);
 
-    // Start zero-account public reverse tunnel
-    bool tunnel_ok = start_public_tunnel(active_port);
-    if (tunnel_ok) {
-        status_.public_endpoint = tunnel_public_endpoint_;
-        status_.room_code = encode_endpoint_code(BORE_FALLBACK_IP, tunnel_remote_port_);
-    } else {
-        std::cout << "[P2P] Reverse tunnel unavailable, falling back to STUN / UPnP." << std::endl;
-        status_.public_endpoint = discover_public_endpoint(active_port);
-        if (status_.public_endpoint.empty()) {
-            status_.public_endpoint = status_.local_endpoint;
-        }
-        std::string pub_ip = status_.public_endpoint;
-        auto colon_pos = pub_ip.find(':');
-        if (colon_pos != std::string::npos) pub_ip = pub_ip.substr(0, colon_pos);
-        status_.room_code = encode_endpoint_code(pub_ip, active_port);
-        if (status_.room_code.empty()) {
-            status_.room_code = status_.lan_room_code.empty() ? generate_room_code() : status_.lan_room_code;
-        }
-    }
+    bool tunnel_ok = false;
 
-    is_running_ = true;
-    status_.state = ConnectionState::Connected;
+    if (status_.server_listening){
+        tunnel_ok = start_public_tunnel(active_port);
+        if (tunnel_ok) {
+            status_.public_endpoint = tunnel_public_endpoint_;
+            status_.room_code = encode_endpoint_code(BORE_FALLBACK_IP, tunnel_remote_port_);
+            status_.state = ConnectionState::Connected;
+            is_running_ = true;
+            start_host_signaling();
+
+            std::cout << "[P2P] Host session started for server " << active_server_id
+                      << " | Room Code: " << status_.room_code
+                      << " | LAN Code: " << status_.lan_room_code
+                      << " | Public: " << status_.public_endpoint
+                      << " | LAN: " << status_.local_endpoint
+                      << " | Tunnel: " << (tunnel_ok ? "Active" : "Inactive")
+                      << " | UPnP: " << (upnp_ok ? "Active" : "Inactive")
+                      << " | Server Listening: " << (status_.server_listening ? "Yes" : "No") << std::endl;
+
+        } else {
+            std::cout << "TUNNEL START FAILED";
+            throw std::runtime_error("TUNNEL START FAILED");
+        }
+    }else{
+        std::cout << "SERVER RESPONSE FAILED";
+        throw std::runtime_error("SERVER RESPONSE FAILED");
+    }
 
     start_host_signaling();
 
     std::cout << "[P2P] Host session started for server " << active_server_id
-              << " | Room Code: " << status_.room_code 
+              << " | Room Code: " << status_.room_code
               << " | LAN Code: " << status_.lan_room_code
               << " | Public: " << status_.public_endpoint
               << " | LAN: " << status_.local_endpoint
@@ -1410,8 +1416,8 @@ nlohmann::json P2PManager::join_session(const std::string& room_code, uint16_t l
 
     start_client_heartbeat();
 
-    std::cout << "[P2P] Client bridged to " << clean_code 
-              << " (" << primary_ip << ":" << target_port << ") via local proxy 127.0.0.1:" << status_.local_proxy_port 
+    std::cout << "[P2P] Client bridged to " << clean_code
+              << " (" << primary_ip << ":" << target_port << ") via local proxy 127.0.0.1:" << status_.local_proxy_port
               << " | Host Reachable: " << (host_reachable ? "Yes" : "No") << std::endl;
 
     return {
