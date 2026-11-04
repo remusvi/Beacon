@@ -241,49 +241,80 @@ const handleDeopPlayer = async (player) => {
     }
 };
 
-const handleKickPlayer = async (player) => {
+const playerModalOpen = ref(false);
+const playerModalType = ref("kick"); // "kick" | "ban"
+const playerModalTarget = ref(null);
+const playerModalReason = ref("");
+const isSubmittingPlayerAction = ref(false);
+
+const handleKickPlayer = (player) => {
     if (!activeInstance.value || !player) return;
-    const reason = window.prompt(`Kick ${player.name} with reason:`, "Kicked by operator");
-    if (reason === null) return;
-    try {
-        if (window.kickPlayer) {
-            const res = await window.kickPlayer(activeInstance.value.id.toString(), player.name, reason);
-            const data = typeof res === "string" ? JSON.parse(res) : res;
-            if (data.status === "ok") {
-                showFeedback(`Kicked ${player.name} (${reason})`);
-                if (selectedPlayer.value?.name === player.name) {
-                    selectedPlayer.value = null;
-                }
-            } else {
-                showFeedback(`Failed to kick: ${data.error || "Unknown error"}`);
-            }
-        }
-        await refreshServerData(activeInstance.value.id);
-    } catch (err) {
-        showFeedback(`Error: ${err.message || err}`);
-    }
+    playerModalTarget.value = player;
+    playerModalType.value = "kick";
+    playerModalReason.value = "Kicked by operator";
+    playerModalOpen.value = true;
 };
 
-const handleBanPlayer = async (player) => {
+const handleBanPlayer = (player) => {
     if (!activeInstance.value || !player) return;
-    const reason = window.prompt(`Ban ${player.name} with reason:`, "Banned by operator");
-    if (reason === null) return;
+    playerModalTarget.value = player;
+    playerModalType.value = "ban";
+    playerModalReason.value = "Banned by operator";
+    playerModalOpen.value = true;
+};
+
+const cancelPlayerAction = () => {
+    if (isSubmittingPlayerAction.value) return;
+    playerModalOpen.value = false;
+    playerModalTarget.value = null;
+    playerModalReason.value = "";
+};
+
+const confirmPlayerAction = async () => {
+    if (!activeInstance.value || !playerModalTarget.value || isSubmittingPlayerAction.value) return;
+    const player = playerModalTarget.value;
+    const actionType = playerModalType.value;
+    const defaultReason = actionType === "kick" ? "Kicked by operator" : "Banned by operator";
+    const reason = playerModalReason.value.trim() || defaultReason;
+    const serverId = activeInstance.value.id.toString();
+
+    isSubmittingPlayerAction.value = true;
     try {
-        if (window.banPlayer) {
-            const res = await window.banPlayer(activeInstance.value.id.toString(), player.name, reason);
-            const data = typeof res === "string" ? JSON.parse(res) : res;
-            if (data.status === "ok") {
-                showFeedback(`Banned ${player.name} (${reason})`);
-                if (selectedPlayer.value?.name === player.name) {
-                    selectedPlayer.value = null;
+        if (actionType === "kick") {
+            if (window.kickPlayer) {
+                const res = await window.kickPlayer(serverId, player.name, reason);
+                const data = typeof res === "string" ? JSON.parse(res) : res;
+                if (data.status === "ok") {
+                    showFeedback(`Kicked ${player.name} (${reason})`);
+                    if (selectedPlayer.value?.name === player.name) {
+                        selectedPlayer.value = null;
+                    }
+                } else {
+                    showFeedback(`Failed to kick: ${data.error || "Unknown error"}`);
                 }
-            } else {
-                showFeedback(`Failed to ban: ${data.error || "Unknown error"}`);
+            }
+        } else {
+            if (window.banPlayer) {
+                const res = await window.banPlayer(serverId, player.name, reason);
+                const data = typeof res === "string" ? JSON.parse(res) : res;
+                if (data.status === "ok") {
+                    showFeedback(`Banned ${player.name} (${reason})`);
+                    if (selectedPlayer.value?.name === player.name) {
+                        selectedPlayer.value = null;
+                    }
+                } else {
+                    showFeedback(`Failed to ban: ${data.error || "Unknown error"}`);
+                }
             }
         }
+        playerModalOpen.value = false;
+        playerModalTarget.value = null;
+        playerModalReason.value = "";
         await refreshServerData(activeInstance.value.id);
     } catch (err) {
         showFeedback(`Error: ${err.message || err}`);
+    } finally {
+        isSubmittingPlayerAction.value = false;
     }
 };
 
@@ -1246,6 +1277,86 @@ onUnmounted(() => {
                         >
                             <Trash2 :size="16" />
                             <span>{{ isDeleting ? "Deleting..." : "Delete Instance" }}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </transition>
+
+        <!-- Player Moderation (Kick / Ban) Modal -->
+        <transition name="pop">
+            <div
+                v-if="playerModalOpen"
+                class="modal-overlay"
+                @click.self="cancelPlayerAction"
+            >
+                <div class="modal-glass">
+                    <span class="section-label">Player Moderation</span>
+                    <h2 class="deploy-instance">
+                        {{ playerModalType === 'kick' ? 'Kick Player' : 'Ban Player' }}
+                    </h2>
+
+                    <div class="input-stack">
+                        <label>Target Player</label>
+                        <div class="fancy-input player-modal-target-preview">
+                            <div class="player-modal-identity">
+                                <img
+                                    :src="`https://mc-heads.net/avatar/${playerModalTarget?.name}/32`"
+                                    class="player-modal-avatar"
+                                    :alt="playerModalTarget?.name"
+                                    @error="(e) => { e.target.src = `https://minotar.net/avatar/${playerModalTarget?.name}/32`; }"
+                                />
+                                <div class="player-modal-info">
+                                    <span class="player-modal-name">{{ playerModalTarget?.name }}</span>
+                                    <code class="player-modal-uuid">{{ playerModalTarget?.uuid }}</code>
+                                </div>
+                            </div>
+                            <span v-if="playerModalTarget?.isOp" class="op-badge">OP</span>
+                        </div>
+                    </div>
+
+                    <div class="input-stack">
+                        <label>Reason</label>
+                        <input
+                            v-model="playerModalReason"
+                            class="fancy-input"
+                            :placeholder="playerModalType === 'kick' ? 'e.g. Inactivity, rule violation' : 'e.g. Griefing, hacking, unauthorized actions'"
+                            @keyup.enter="confirmPlayerAction"
+                            autofocus
+                        />
+                    </div>
+
+                    <div class="toggle-stack running-notice">
+                        <div class="toggle-info">
+                            <span class="toggle-label">{{ playerModalType === 'kick' ? 'Server Disconnect' : 'Permanent Ban' }}</span>
+                            <span class="toggle-desc">
+                                {{ playerModalType === 'kick'
+                                    ? 'The player will be immediately kicked from the server and may reconnect later.'
+                                    : 'The player will be immediately kicked and added to banned-players.json.' }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button
+                            class="btn-secondary"
+                            @click="cancelPlayerAction"
+                            :disabled="isSubmittingPlayerAction"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            class="primary-btn danger-btn"
+                            @click="confirmPlayerAction"
+                            :disabled="isSubmittingPlayerAction"
+                        >
+                            <LogOut v-if="playerModalType === 'kick'" :size="16" />
+                            <Ban v-else :size="16" />
+                            <span>
+                                {{ isSubmittingPlayerAction
+                                    ? (playerModalType === 'kick' ? 'Kicking...' : 'Banning...')
+                                    : (playerModalType === 'kick' ? 'Kick ' + playerModalTarget?.name : 'Ban ' + playerModalTarget?.name) }}
+                            </span>
                         </button>
                     </div>
                 </div>
@@ -2287,5 +2398,37 @@ h1 {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+.player-modal-target-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.player-modal-identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.player-modal-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    image-rendering: pixelated;
+}
+.player-modal-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.player-modal-name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #ffffff;
+}
+.player-modal-uuid {
+    font-size: 0.72rem;
+    color: #86868b;
+    font-family: "JetBrains Mono", monospace;
 }
 </style>
