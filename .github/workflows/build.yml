@@ -2,7 +2,7 @@ name: Build & Package Binaries
 
 on:
   push:
-    branches: [ "main", "clean-up", "p2p-multiplayer" ]
+    branches: [ "main", "clean-up", "p2p-multiplayer", "beacon-cpp" ]
     tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
@@ -23,7 +23,7 @@ jobs:
             os-name: macOS (Apple Silicon arm64)
             artifact-name: Beacon-macos-arm64
             target: macos
-          - os: macos-13
+          - os: macos-15-intel
             os-name: macOS (Intel x86_64)
             artifact-name: Beacon-macos-x86_64
             target: macos
@@ -111,10 +111,28 @@ jobs:
           path: ${{ matrix.artifact-name }}.zip
           if-no-files-found: error
 
-      - name: Publish Release Asset
-        if: startsWith(github.ref, 'refs/tags/v')
+  publish:
+    name: Publish snapshot or release
+    needs: build
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/beacon-cpp' || startsWith(github.ref, 'refs/tags/v'))
+    steps:
+      - name: Download all platform packages
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact-name }}.zip
+          tag_name: ${{ github.ref == 'refs/heads/beacon-cpp' && format('snapshot-{0}', github.run_number) || github.ref_name }}
+          name: ${{ github.ref == 'refs/heads/beacon-cpp' && format('Beacon snapshot {0}', github.run_number) || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ github.ref == 'refs/heads/beacon-cpp' }}
+          files: release-assets/*.zip
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
